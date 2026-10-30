@@ -58,10 +58,25 @@ auto-hébergé.
    Après une mise à jour du code, applique les nouvelles migrations de `supabase/migrations/` de la même façon
    (`./scripts/db-apply-local.sh supabase/migrations/0122_xxx.sql`).
 4. **Authentification** : dans les variables du service Supabase, `SITE_URL` (GOTRUE_SITE_URL) = l'URL de l'app, et
-   ajoute-la à la liste des redirections autorisées. Pour les emails de connexion, renseigne le SMTP
-   (`GOTRUE_SMTP_*`, par exemple Resend).
+   ajoute-la à la liste des redirections autorisées (sinon les liens de confirmation pointent vers `localhost`).
+   Si la confirmation par email est active et qu'aucun SMTP n'est configuré, **personne ne peut finir son
+   inscription**, et le mot de passe oublié ne part pas. Deux solutions :
+   - pour tester : `ENABLE_EMAIL_AUTOCONFIRM=true` (les comptes sont valides sans email) ;
+   - en usage réel : un SMTP (Resend, Brevo…) via les variables `SMTP_*` du service.
+
+   Les collègues n'ont rien d'autre à configurer : **Nouveau > Inviter un membre** génère un lien, la personne crée
+   son compte avec cette adresse et rejoint l'espace. Le portail client (`/c/<slug>`) utilise les mêmes comptes.
 5. **Tâches planifiées** : `pg_cron` et `pg_net` appellent l'app depuis le conteneur Postgres. Dans
    Réglages > Installation, programme-les : l'URL publique de l'app doit être joignable depuis ce conteneur.
 
 Les scripts `db-apply.mjs` et `gen-types.sh` utilisent l'API Management de Supabase Cloud et ne servent pas
 en auto-hébergé.
+
+## Inscription fermée après le premier compte
+
+Comme la plupart des apps auto-hébergées, le premier compte est libre ; ensuite le lien « Créer un compte » disparaît
+et `/signup` renvoie vers `/login`. Les invitations d'équipe et du portail client continuent de fonctionner.
+
+Pour que Supabase refuse aussi les inscriptions faites directement auprès de son API (la clé `anon` est publique),
+applique une fois `supabase/optional/inscriptions-sur-invitation.sql` dans le SQL Editor. Pour rouvrir l'inscription :
+`drop trigger invite_only_signup on auth.users;`.
