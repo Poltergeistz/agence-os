@@ -3,6 +3,7 @@ import { Suspense } from "react";
 
 import { AuthShell, LoginForm } from "@/components/auth/auth-form";
 import { inviteFromNext } from "@/lib/portal/invite";
+import { signupClosed } from "@/lib/signup";
 
 export const metadata = { title: "Connexion" };
 
@@ -33,7 +34,7 @@ export default async function Login({ searchParams }: PageProps<"/login">) {
       </AuthShell>
     );
   return (
-    <AuthShell title="Bon retour" sub="Connecte-toi à ton espace agence." foot={<>Pas encore de compte ? <Link href="/signup" style={{ color: "var(--accent)" }}>Créer un compte</Link></>}>
+    <AuthShell title="Bon retour" sub="Connecte-toi à ton espace agence." foot={(await signupClosed()) ? undefined : <>Pas encore de compte ? <Link href="/signup" style={{ color: "var(--accent)" }}>Créer un compte</Link></>}>
       <Suspense>
         <LoginForm />
       </Suspense>

@@ -1,14 +1,17 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { AuthShell, SignupForm } from "@/components/auth/auth-form";
 import { inviteFromNext } from "@/lib/portal/invite";
+import { signupClosed } from "@/lib/signup";
 
 export const metadata = { title: "Créer un compte" };
 
 export default async function Signup({ searchParams }: PageProps<"/signup">) {
   // Invitation au portail client : la page prend les couleurs de l'agence et l'email de l'invitation
-  const invite = await inviteFromNext((await searchParams).next);
+  const { next } = await searchParams;
+  const invite = await inviteFromNext(next);
   if (invite)
     return (
       <AuthShell
@@ -22,6 +25,7 @@ export default async function Signup({ searchParams }: PageProps<"/signup">) {
         </Suspense>
       </AuthShell>
     );
+  if ((await signupClosed()) && !(typeof next === "string" && next.startsWith("/invite/"))) redirect("/login");
   return (
     <AuthShell title="Crée ton espace agence" sub="Projets, CRM, propositions et reporting au même endroit." foot={<>Déjà inscrit ? <Link href="/login" style={{ color: "var(--accent)" }}>Se connecter</Link></>}>
       <Suspense>
