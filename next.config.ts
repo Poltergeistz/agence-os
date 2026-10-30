@@ -8,6 +8,7 @@ const shortHost = (process.env.NEXT_PUBLIC_SHORT_DOMAIN || "")
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  output: process.env.DOCKER_BUILD === "1" ? "standalone" : undefined,
   turbopack: { root: __dirname },
   async redirects() {
     if (!shortHost || !process.env.NEXT_PUBLIC_APP_URL) return [];

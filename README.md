@@ -102,7 +102,7 @@ L'édition se choisit à l'installation (`NEXT_PUBLIC_EDITION`). Ajouter les mod
 Suis le guide [docs/deploiement.md](docs/deploiement.md) : Supabase (gratuit) et un hébergement
 Node.js (Hostinger, VPS ou Vercel Pro), environ 30 à 45 minutes, l'essentiel fait par Claude Code.
 Ensuite, **Réglages > Installation** donne pour chaque connexion un prompt Claude in Chrome et un
-bouton qui teste le résultat. Pour brancher Meta Ads et Google Ads : [docs/reporting.md](docs/reporting.md). Guides : [tracking](docs/tracking.md), [liens](docs/liens.md), [signature](docs/signature-electronique.md), [onboarding client](docs/onboarding-client.md), [rendez-vous](docs/rendez-vous.md), [bibliothèque créa](docs/bibliotheque-creative.md), [MCP](docs/mcp.md), [portail client](docs/portail-client.md), [analytics GA4 et Clarity](docs/analytics.md).
+bouton qui teste le résultat. Avec Docker ou Coolify : [docs/docker-coolify.md](docs/docker-coolify.md). Pour brancher Meta Ads et Google Ads : [docs/reporting.md](docs/reporting.md). Guides : [tracking](docs/tracking.md), [liens](docs/liens.md), [signature](docs/signature-electronique.md), [onboarding client](docs/onboarding-client.md), [rendez-vous](docs/rendez-vous.md), [bibliothèque créa](docs/bibliotheque-creative.md), [MCP](docs/mcp.md), [portail client](docs/portail-client.md), [analytics GA4 et Clarity](docs/analytics.md).
 
 ## Stack technique
 
