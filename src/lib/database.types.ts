@@ -755,6 +755,8 @@ export type Database = {
           display_name: string
           event_calendar: string
           headline: string
+          privacy_url: string
+          terms_url: string
           id: string
           slug: string
           timezone: string
@@ -770,6 +772,8 @@ export type Database = {
           display_name?: string
           event_calendar?: string
           headline?: string
+          privacy_url?: string
+          terms_url?: string
           id?: string
           slug: string
           timezone?: string
@@ -785,6 +789,8 @@ export type Database = {
           display_name?: string
           event_calendar?: string
           headline?: string
+          privacy_url?: string
+          terms_url?: string
           id?: string
           slug?: string
           timezone?: string
@@ -841,6 +847,8 @@ export type Database = {
           buffer_after_min: number
           buffer_before_min: number
           color: string
+          contact_first: boolean
+          contact_mode: string
           create_deal: boolean
           created_at: string
           daily_limit: number | null
@@ -865,6 +873,8 @@ export type Database = {
           buffer_after_min?: number
           buffer_before_min?: number
           color?: string
+          contact_first?: boolean
+          contact_mode?: string
           create_deal?: boolean
           created_at?: string
           daily_limit?: number | null
@@ -889,6 +899,8 @@ export type Database = {
           buffer_after_min?: number
           buffer_before_min?: number
           color?: string
+          contact_first?: boolean
+          contact_mode?: string
           create_deal?: boolean
           created_at?: string
           daily_limit?: number | null

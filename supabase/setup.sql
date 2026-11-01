@@ -1,5 +1,5 @@
 -- Agence OS : installation complète (généré par scripts/build-setup-sql.mjs, ne pas modifier à la main)
--- Migrations incluses : 0001_schema.sql, 0002_member_profile_fk.sql, 0003_demo_data.sql, 0005_revoke_anon_helpers.sql, 0020_workspace_notifications.sql, 0040_proposals.sql, 0050_reporting.sql, 0060_tracking_links.sql, 0061_tracking_attribution.sql, 0062_links.sql, 0063_tracking_secret.sql, 0064_demo_tracking_chunks.sql, 0070_proposal_signature.sql, 0071_onboarding.sql, 0072_creatives.sql, 0073_booking.sql, 0074_api_tokens.sql, 0080_workspace_modules.sql, 0082_creative_intel.sql, 0090_client_portal.sql, 0091_portal_rpc.sql, 0092_portal_agency.sql, 0095_analytics.sql, 0100_tracking_funnel_keys.sql, 0101_tracking_identity_signals.sql, 0102_tracking_person_coverage.sql, 0103_tracking_ext_api.sql, 0120_installation.sql, 0121_creative_analysis.sql
+-- Migrations incluses : 0001_schema.sql, 0002_member_profile_fk.sql, 0003_demo_data.sql, 0005_revoke_anon_helpers.sql, 0020_workspace_notifications.sql, 0040_proposals.sql, 0050_reporting.sql, 0060_tracking_links.sql, 0061_tracking_attribution.sql, 0062_links.sql, 0063_tracking_secret.sql, 0064_demo_tracking_chunks.sql, 0070_proposal_signature.sql, 0071_onboarding.sql, 0072_creatives.sql, 0073_booking.sql, 0074_api_tokens.sql, 0080_workspace_modules.sql, 0082_creative_intel.sql, 0090_client_portal.sql, 0091_portal_rpc.sql, 0092_portal_agency.sql, 0095_analytics.sql, 0100_tracking_funnel_keys.sql, 0101_tracking_identity_signals.sql, 0102_tracking_person_coverage.sql, 0103_tracking_ext_api.sql, 0120_installation.sql, 0121_creative_analysis.sql, 0122_booking_contact_first.sql
 
 -- =====================================================================
 -- 0001_schema.sql
@@ -7622,3 +7622,26 @@ returns void language sql security definer set search_path = public as $$
 $$;
 revoke execute on function public._clear_demo_creative_naming(uuid) from anon, authenticated, public;
 grant execute on function public._clear_demo_creative_naming(uuid) to service_role;
+
+-- =====================================================================
+-- 0122_booking_contact_first.sql
+-- =====================================================================
+-- =====================================================================
+-- 0122 : réservation « coordonnées d'abord »
+-- contact_first : le formulaire passe avant le calendrier et le contact est enregistré dès la saisie.
+-- contact_mode  : moyen de contact demandé (email, téléphone ou les deux).
+-- terms_url, privacy_url : liens de la mention de consentement affichée sous le formulaire.
+-- Les valeurs par défaut conservent le comportement existant.
+-- =====================================================================
+
+alter table public.booking_types add column if not exists contact_first boolean not null default false;
+alter table public.booking_types add column if not exists contact_mode text not null default 'email';
+alter table public.booking_types drop constraint if exists booking_types_contact_mode_check;
+alter table public.booking_types add constraint booking_types_contact_mode_check check (contact_mode in ('email', 'phone', 'both'));
+
+alter table public.booking_profiles add column if not exists terms_url text not null default '';
+alter table public.booking_profiles add column if not exists privacy_url text not null default '';
+
+create or replace function public.schema_version()
+returns int language sql immutable as $$ select 122 $$;
+grant execute on function public.schema_version() to authenticated, service_role;
