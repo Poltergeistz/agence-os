@@ -41,7 +41,7 @@ export function Installation({ items, envSet, schema, jobs: initialJobs, ctx, ed
     if (i.id === "cron")
       return envSet.CRON_SECRET && jobs?.length && jobs.every((j) => j.scheduled) && !jobs.some((j) => j.last_error || (j.last_http && j.last_http !== 200)) ? "ok" : "todo";
     if (!i.env.length) return i.required ? "todo" : "optional";
-    if (i.env.every((k) => envSet[k])) return "ok";
+    if (i.anyEnv ? i.env.some((k) => envSet[k]) : i.env.every((k) => envSet[k])) return "ok";
     return i.required || i.env.some((k) => envSet[k]) ? "todo" : "optional";
   };
   const required = list.filter((i) => i.required);

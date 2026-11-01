@@ -84,7 +84,7 @@ export function Recos({ data, conceptCount }: { data: IntelData; conceptCount: R
           )}
         />
         {ws.canWrite && (
-          <button type="button" className="btn btn-primary" disabled={!data.ai.enabled || !!busy || !company} onClick={generate} title={data.ai.enabled ? `Modèle : ${data.ai.smart}` : "Ajoute ANTHROPIC_API_KEY pour générer"}>
+          <button type="button" className="btn btn-primary" disabled={!data.ai.enabled || !!busy || !company} onClick={generate} title={data.ai.enabled ? `Modèle : ${data.ai.smart}` : "Configure une clé IA (Réglages > Installation) pour générer"}>
             <Sparkles size={14} /> {busy === "gen" ? "Analyse en cours (jusqu'à une minute)…" : "Générer"}
           </button>
         )}

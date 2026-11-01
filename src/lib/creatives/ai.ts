@@ -3,29 +3,31 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
+import { AiError, chat } from "./ai-chat";
+import { modelsFor, resolveProvider, type Provider } from "./ai-provider";
 import { RecommendationSchema, TagBatchSchema, mockRecommendation, mockTags, validateRecommendation, validateTagBatch, type RecoInput, type Recommendation } from "./ai-parse";
 import type { IntelTags } from "./intel-core";
 
 // IA de la bibliothèque créa (facultative) : tagging en masse et recommandations.
-// Sans ANTHROPIC_API_KEY, tout le reste fonctionne ; AI_MOCK=1 (interne, tests)
-// renvoie des réponses simulées sans appel réseau.
+// Fournisseur au choix (voir ai-provider.ts) : Anthropic, OpenRouter ou toute API compatible OpenAI.
+// Sans clé, tout le reste fonctionne ; AI_MOCK=1 (interne, tests) renvoie des réponses
+// simulées sans appel réseau.
 
-export const AI_MODEL_FAST = () => process.env.AI_MODEL_FAST || "claude-haiku-4-5-20251001";
-export const AI_MODEL_SMART = () => process.env.AI_MODEL_SMART || "claude-sonnet-5";
+const provider = () => resolveProvider(process.env);
+const ANTHROPIC: Provider = { kind: "anthropic", id: "anthropic", label: "Anthropic", keyVar: "ANTHROPIC_API_KEY" };
+const models = () => modelsFor(provider() ?? ANTHROPIC, process.env);
+export const AI_MODEL_FAST = () => models().fast;
+export const AI_MODEL_SMART = () => models().smart;
+export const aiProviderLabel = () => provider()?.label ?? null;
 const mock = () => process.env.AI_MOCK === "1";
 
 /** Nombre maximum d'éléments tagués par synchro ou par clic (maîtrise du coût). */
 export const AI_TAG_LIMIT = Math.max(0, Number(process.env.AI_TAG_LIMIT || 40)) || 40;
 const BATCH = 10;
 
-export const aiEnabled = () => mock() || !!process.env.ANTHROPIC_API_KEY;
+export const aiEnabled = () => mock() || (!!provider() && !!models().fast && !!models().smart);
 
-export class AiError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AiError";
-  }
-}
+export { AiError };
 
 let cached: Anthropic | null = null;
 const client = () => (cached ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120_000 }));
@@ -40,6 +42,8 @@ function explain(e: unknown): AiError {
   if (e instanceof Anthropic.BadRequestError) return new AiError(`Requête refusée par l'API Anthropic : ${e.message.slice(0, 200)}`);
   if (e instanceof Anthropic.APIConnectionError) return new AiError("Impossible de joindre l'API Anthropic (réseau ou délai dépassé).");
   if (e instanceof Anthropic.APIError) return new AiError(`API Anthropic indisponible (${e.status ?? "erreur"}) : réessaie plus tard.`);
+  if (e instanceof TypeError || (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")))
+    return new AiError(`Impossible de joindre ${provider()?.label ?? "le fournisseur IA"} (réseau ou délai dépassé).`);
   return new AiError(e instanceof Error ? e.message : String(e));
 }
 
@@ -60,21 +64,23 @@ Réponds uniquement pour les identifiants fournis.`;
 
 async function tagBatch(items: { id: string; text: string; format?: string | null }[]): Promise<Map<string, IntelTags>> {
   if (mock()) return new Map(items.map((i) => [i.id, mockTags(i)]));
+  const ids = items.map((i) => i.id);
+  const user = `Classe ces ${items.length} éléments :\n\n${items.map((i) => `<element id="${i.id}"${i.format ? ` format_connu="${i.format}"` : ""}>\n${i.text.slice(0, 1500)}\n</element>`).join("\n\n")}`;
+  const p = provider();
+  if (p?.kind === "openai") {
+    const r = await chat(p, { model: AI_MODEL_FAST(), system: TAG_SYSTEM, user, schema: TagBatchSchema, schemaName: "tags", maxTokens: 6000 });
+    return validateTagBatch(r.json, ids);
+  }
   const res = await client().messages.parse({
     model: AI_MODEL_FAST(),
     max_tokens: 6000,
     system: [{ type: "text", text: TAG_SYSTEM, cache_control: { type: "ephemeral" } }],
-    messages: [
-      {
-        role: "user",
-        content: `Classe ces ${items.length} éléments :\n\n${items.map((i) => `<element id="${i.id}"${i.format ? ` format_connu="${i.format}"` : ""}>\n${i.text.slice(0, 1500)}\n</element>`).join("\n\n")}`,
-      },
-    ],
+    messages: [{ role: "user", content: user }],
     output_config: { format: zodOutputFormat(TagBatchSchema) },
   });
   if (res.stop_reason === "max_tokens") throw new AiError("Réponse du modèle tronquée : réduis la taille du lot.");
   if (res.stop_reason === "refusal") throw new AiError("Le modèle a refusé de classer ce lot.");
-  return validateTagBatch(res.parsed_output, items.map((i) => i.id));
+  return validateTagBatch(res.parsed_output, ids);
 }
 
 /** Tague une liste d'éléments par lots. Renvoie les tags obtenus et la première erreur éventuelle. */
@@ -108,17 +114,18 @@ export async function recommend(input: RecoInput): Promise<{ output: Recommendat
   const known = input.competitors.map((c) => c.archive_id);
   if (mock()) return { output: validateRecommendation(mockRecommendation(input), known), model: "simulation", usage: null };
   try {
+    const user = `Client : ${input.company}\nDonnées (JSON) :\n${JSON.stringify(input)}\n\nPropose les opportunités.`;
+    const p = provider();
+    if (p?.kind === "openai") {
+      const r = await chat(p, { model: AI_MODEL_SMART(), system: RECO_SYSTEM, user, schema: RecommendationSchema, schemaName: "recommandation", maxTokens: 16000 });
+      return { output: validateRecommendation(r.json, known), model: AI_MODEL_SMART(), usage: { ...r.usage, cache_read: 0 } };
+    }
     const res = await client().messages.parse({
       model: AI_MODEL_SMART(),
       max_tokens: 16000,
       thinking: { type: "adaptive" },
       system: [{ type: "text", text: RECO_SYSTEM, cache_control: { type: "ephemeral" } }],
-      messages: [
-        {
-          role: "user",
-          content: `Client : ${input.company}\nDonnées (JSON) :\n${JSON.stringify(input)}\n\nPropose les opportunités.`,
-        },
-      ],
+      messages: [{ role: "user", content: user }],
       output_config: { effort: "medium", format: zodOutputFormat(RecommendationSchema) },
     });
     if (res.stop_reason === "max_tokens") throw new AiError("Réponse du modèle tronquée : réessaie.");

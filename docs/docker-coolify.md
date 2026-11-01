@@ -10,7 +10,7 @@ healthcheck) et un `docker-compose.yml`. La base reste sur Supabase : seul le co
    - Coche **Build Variable** pour `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
      `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_EDITION` et `NEXT_PUBLIC_SHORT_DOMAIN` : elles sont incrustées dans
      le code au build. Les modifier demande un **redeploy**, pas un simple restart.
-   - Les autres (`SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, clés Meta, Google, Resend, Anthropic…) sont lues au
+   - Les autres (`SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, clés Meta, Google, Resend, IA : Anthropic, OpenRouter ou autre…) sont lues au
      démarrage.
 3. **Domains** : `https://os.mon-agence.fr` (identique à `NEXT_PUBLIC_APP_URL`). Coolify gère le certificat.
 4. **Deploy**. Le healthcheck du `Dockerfile` marque l'app saine quand `/` répond.

@@ -5,7 +5,7 @@ import { runCheck } from "@/lib/setup/checks";
 import { requestOrigin } from "@/lib/setup/origin";
 import type { CheckId } from "@/lib/setup/types";
 
-const IDS: CheckId[] = ["app_url", "schema", "cron", "meta", "google", "resend", "anthropic"];
+const IDS: CheckId[] = ["app_url", "schema", "cron", "meta", "google", "resend", "ai"];
 
 /** POST /api/setup/test { ws, check } : teste un réglage du serveur (admins de l'espace). Ne renvoie aucun secret. */
 export async function POST(req: NextRequest) {
