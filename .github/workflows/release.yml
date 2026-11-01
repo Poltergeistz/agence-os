@@ -1,7 +1,9 @@
 name: Release
 
-# Sur main : calcule la version (semver, d'après les messages de commit), construit l'image,
-# la publie sur Docker Hub (X.Y.Z et latest) puis crée le tag et la fiche de version.
+# Sur main : calcule la version (semver, d'après les messages de commit : feat = mineure, fix = correctif,
+# ! ou BREAKING CHANGE = majeure), commite CHANGELOG.md et la version de package.json, pose le tag et la fiche
+# de version, puis construit l'image et la publie sur Docker Hub (X.Y.Z et latest).
+# Aucune version si aucun commit feat/fix depuis la précédente.
 # Sur une branche ci/** : essai à blanc (connexion et construction, sans publication ni tag).
 
 on:
@@ -14,6 +16,8 @@ concurrency:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
   release:
@@ -45,30 +49,44 @@ jobs:
           fi
           echo "::warning::Essai à blanc avec des valeurs factices, variables manquantes :$missing"
 
-      - name: Prochaine version
+      - uses: actions/setup-node@v4
+        if: env.PUBLISH == 'true'
+        with:
+          node-version: 22
+
+      - name: Version
         id: version
         if: env.PUBLISH == 'true'
-        uses: mathieudutour/github-tag-action@v6.2
+        uses: cycjimmy/semantic-release-action@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          dry_run: true
-          default_bump: patch
-          tag_prefix: v
-          release_branches: main
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Se placer sur la version publiée
+        if: steps.version.outputs.new_release_published == 'true'
+        run: |
+          git fetch --tags origin
+          git checkout "v${{ steps.version.outputs.new_release_version }}"
 
       - uses: docker/setup-buildx-action@v3
+        if: env.PUBLISH != 'true' || steps.version.outputs.new_release_published == 'true'
 
       - uses: docker/login-action@v3
+        if: env.PUBLISH != 'true' || steps.version.outputs.new_release_published == 'true'
         with:
           username: ${{ vars.DOCKERHUB_USERNAME || 'poltergeistz' }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - uses: docker/build-push-action@v6
+        if: env.PUBLISH != 'true' || steps.version.outputs.new_release_published == 'true'
         with:
           context: .
           push: ${{ env.PUBLISH == 'true' }}
           tags: |
-            ${{ env.IMAGE }}:${{ steps.version.outputs.new_version || 'essai' }}
+            ${{ env.IMAGE }}:${{ steps.version.outputs.new_release_version || 'essai' }}
             ${{ env.IMAGE }}:${{ env.PUBLISH == 'true' && 'latest' || 'essai' }}
           build-args: |
             NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
@@ -78,9 +96,3 @@ jobs:
             NEXT_PUBLIC_SHORT_DOMAIN=${{ vars.NEXT_PUBLIC_SHORT_DOMAIN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Tag et fiche de version
-        if: env.PUBLISH == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${{ steps.version.outputs.new_tag }}" --target "$GITHUB_SHA" --title "${{ steps.version.outputs.new_tag }}" --generate-notes
