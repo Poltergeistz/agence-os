@@ -123,11 +123,11 @@ function PageTab({ d, canEdit }: { d: Data; canEdit: boolean }) {
   const mutate = useMutate();
   const p = d.profile!;
   const base = publicBase(d.appUrl);
-  const [form, setForm] = useState({ display_name: p.display_name, headline: p.headline, welcome: p.welcome, slug: p.slug, active: p.active });
+  const [form, setForm] = useState({ display_name: p.display_name, headline: p.headline, welcome: p.welcome, slug: p.slug, active: p.active, terms_url: p.terms_url, privacy_url: p.privacy_url });
   const [editing, setEditing] = useState<BookingType | "new" | null>(null);
   const [del, setDel] = useState<BookingType | null>(null);
   const [embedType, setEmbedType] = useState<string>("");
-  const dirty = form.display_name !== p.display_name || form.headline !== p.headline || form.welcome !== p.welcome || form.slug !== p.slug || form.active !== p.active;
+  const dirty = form.display_name !== p.display_name || form.headline !== p.headline || form.welcome !== p.welcome || form.slug !== p.slug || form.active !== p.active || form.terms_url !== p.terms_url || form.privacy_url !== p.privacy_url;
   const link = `${base}/b/${p.slug}`;
 
   const saveProfile = () =>
@@ -137,7 +137,7 @@ function PageTab({ d, canEdit }: { d: Data; canEdit: boolean }) {
         if (slug.length < 2) throw new Error("L'adresse doit faire au moins 2 caractères (lettres, chiffres, tirets).");
         const res = await sb
           .from("booking_profiles")
-          .update({ display_name: form.display_name.trim(), headline: form.headline.trim(), welcome: form.welcome.trim(), slug, active: form.active })
+          .update({ display_name: form.display_name.trim(), headline: form.headline.trim(), welcome: form.welcome.trim(), slug, active: form.active, terms_url: form.terms_url.trim(), privacy_url: form.privacy_url.trim() })
           .eq("id", p.id);
         if (res.error?.code === "23505") throw new Error("Cette adresse est déjà prise, choisis-en une autre.");
         return must(res);
@@ -198,6 +198,14 @@ function PageTab({ d, canEdit }: { d: Data; canEdit: boolean }) {
           <div className="field">
             <label htmlFor="bp-head">Accroche</label>
             <input id="bp-head" className="input" disabled={!canEdit} value={form.headline} placeholder="Media buyer freelance · Meta et Google Ads" onChange={(e) => setForm({ ...form, headline: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="bp-terms">Lien des conditions</label>
+            <input id="bp-terms" className="input" type="url" disabled={!canEdit} value={form.terms_url} placeholder="https://exemple.fr/conditions" onChange={(e) => setForm({ ...form, terms_url: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="bp-priv">Lien de la politique de confidentialité</label>
+            <input id="bp-priv" className="input" type="url" disabled={!canEdit} value={form.privacy_url} placeholder="https://exemple.fr/confidentialite" onChange={(e) => setForm({ ...form, privacy_url: e.target.value })} />
           </div>
           <div className="field">
             <label htmlFor="bp-wel">Message d&apos;accueil</label>

@@ -43,6 +43,8 @@ interface Draft {
   daily_limit: number | null;
   color: string;
   create_deal: boolean;
+  contact_first: boolean;
+  contact_mode: string;
   active: boolean;
   presets: Record<string, { on: boolean; required: boolean }>;
   custom: Question[];
@@ -70,6 +72,8 @@ function toDraft(t: BookingType | null): Draft {
     daily_limit: t?.daily_limit ?? null,
     color: t?.color ?? "indigo",
     create_deal: t?.create_deal ?? true,
+    contact_first: t?.contact_first ?? false,
+    contact_mode: t?.contact_mode ?? "email",
     active: t?.active ?? true,
     presets,
     custom: qs.filter((q) => !QUESTION_PRESETS.some((p) => p.key === q.key)),
@@ -124,6 +128,8 @@ export function TypeModal({
       daily_limit: d.daily_limit && d.daily_limit > 0 ? Math.min(50, Math.round(d.daily_limit)) : null,
       color: d.color,
       create_deal: d.create_deal,
+      contact_first: d.contact_first,
+      contact_mode: d.contact_mode,
       active: d.active,
       questions: questions() as unknown as never,
     };
@@ -296,6 +302,25 @@ export function TypeModal({
             Créer un deal
           </label>
         </div>
+      </div>
+
+      <div className="field">
+        <label>Coordonnées avant le calendrier</label>
+        <label className="bk-inline" style={{ fontSize: "var(--fs-sm)" }}>
+          <input type="checkbox" className="toggle" checked={d.contact_first} onChange={(e) => set("contact_first", e.target.checked)} />
+          Demander les coordonnées avant d&apos;afficher les créneaux
+        </label>
+        <span className="hint">Le visiteur est enregistré au CRM, à l&apos;étape « Lead non booké » si elle existe, même s&apos;il ne réserve pas de créneau.</span>
+        {d.contact_first && (
+          <>
+            <select id="bt-cm" aria-label="Moyen de contact demandé" className="select" value={d.contact_mode} onChange={(e) => set("contact_mode", e.target.value)}>
+              <option value="email">Email obligatoire, téléphone facultatif</option>
+              <option value="phone">Téléphone obligatoire, email facultatif</option>
+              <option value="both">Téléphone et email obligatoires</option>
+            </select>
+            {d.contact_mode === "phone" && <span className="hint">Sans email, aucun message de confirmation ni de rappel n&apos;est envoyé au visiteur.</span>}
+          </>
+        )}
       </div>
 
       <div className="field">
