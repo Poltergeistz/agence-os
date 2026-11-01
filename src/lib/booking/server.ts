@@ -9,6 +9,11 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { classify } from "@/lib/tracking/channels";
 import { recordConversion, type Site } from "@/lib/tracking/ingest";
 import { readSettings } from "@/lib/tracking/settings";
+import { validateAnswers } from "./answers";
+import { shouldCapture } from "./capture";
+import { canEmail, validateContact, type ContactMode } from "./contact";
+import { advanceStage, leadStage, planLead, type LeadInput } from "./lead";
+import { normalizePhone, phoneVariants } from "./phone";
 import { computeSlots, dayIn, isValidTz, type Existing, type Override, type SlotInput } from "./engine";
 import { guestCancelled, guestConfirmed, hostBooked, hostCancelled, type MailCtx } from "./emails";
 import { CalendarError, createEvent, deleteEvent, freeBusy, getConnection, moveEvent } from "./google";
@@ -49,6 +54,8 @@ export interface PublicProfile {
   weekly: unknown;
   busy_calendars: string[];
   event_calendar: string;
+  terms_url: string;
+  privacy_url: string;
   host: { name: string; email: string; color: string; title: string };
   workspace: { id: string; name: string; slug: string; accent: string };
   types: BookingType[];
@@ -59,7 +66,7 @@ export async function loadPublicProfile(slug: string, withInactiveTypes = false)
   const sb = db();
   const { data: p } = await sb
     .from("booking_profiles")
-    .select("id, slug, workspace_id, user_id, display_name, headline, welcome, timezone, weekly, busy_calendars, event_calendar, active")
+    .select("id, slug, workspace_id, user_id, display_name, headline, welcome, timezone, weekly, busy_calendars, event_calendar, terms_url, privacy_url, active")
     .eq("slug", slug)
     .maybeSingle();
   if (!p || !p.active) return null;
@@ -162,7 +169,7 @@ export const BookSchema = z.object({
   start: z.iso.datetime({ offset: true }),
   tz: z.string().max(64).refine(isValidTz, "Fuseau horaire inconnu"),
   name: z.string().trim().min(2, "Merci d'indiquer votre nom").max(120),
-  email: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : v), z.email("Adresse email invalide").max(254)),
+  email: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : (v ?? "")), z.union([z.literal(""), z.email("Adresse email invalide").max(254)])),
   answers: z.record(z.string().max(40), z.string().max(3000)).default({}),
   utm: z.record(z.string().max(40), z.string().max(300)).default({}),
   aos_id: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).optional(),
@@ -173,6 +180,8 @@ export const BookSchema = z.object({
   website_url: z.string().max(0).optional(),
 });
 export type BookInput = z.infer<typeof BookSchema>;
+
+export const contactModeOf = (t: { contact_first?: boolean; contact_mode?: string }): ContactMode => (t.contact_first && (t.contact_mode === "phone" || t.contact_mode === "both") ? t.contact_mode : "email");
 
 const cleanUtm = (u: Record<string, string>) => {
   const out: Record<string, string> = {};
@@ -201,21 +210,11 @@ export async function book(input: BookInput) {
   const end = start + type.duration_min * MIN;
   if (!Number.isFinite(start)) throw new BookingError("Créneau invalide");
 
-  // Questions obligatoires et valeurs connues
-  const questions = readQuestions(type.questions);
-  const answers: Record<string, string> = {};
-  for (const q of questions) {
-    const v = (input.answers[q.key] ?? "").trim();
-    const required = q.required || (q.key === "phone" && type.location_kind === "phone");
-    if (required && !v) throw new BookingError(`Le champ « ${q.label} » est obligatoire.`);
-    if (v && q.type === "select" && q.options?.length && !q.options.includes(v)) throw new BookingError(`Valeur invalide pour « ${q.label} ».`);
-    if (v) answers[q.key] = v.slice(0, q.type === "textarea" ? 3000 : 300);
-  }
-  if (type.location_kind === "phone" && !questions.some((q) => q.key === "phone")) {
-    const v = (input.answers.phone ?? "").trim();
-    if (!v) throw new BookingError("Merci d'indiquer votre numéro de téléphone.");
-    answers.phone = v.slice(0, 40);
-  }
+  const checked = validateAnswers({ questions: readQuestions(type.questions), locationKind: type.location_kind, answers: input.answers });
+  if (!checked.ok) throw new BookingError(checked.error);
+  const contact = validateContact({ mode: contactModeOf(type), name: input.name, email: input.email, phone: input.answers.phone ?? "" });
+  if (!contact.ok) throw new BookingError(contact.error);
+  const answers = contact.value.phone ? { ...checked.answers, phone: contact.value.phone } : checked.answers;
 
   // Report d'un rendez-vous existant
   let previous: Booking | null = null;
@@ -249,8 +248,8 @@ export async function book(input: BookInput) {
       buffer_before_min: type.buffer_before_min,
       buffer_after_min: type.buffer_after_min,
       timezone: input.tz,
-      name: input.name.trim(),
-      email: input.email,
+      name: contact.value.name,
+      email: contact.value.email,
       phone: answers.phone ?? "",
       company_name: answers.company ?? "",
       answers,
@@ -346,6 +345,102 @@ const hostOfUrl = (u: string) => {
 };
 const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+interface ContactInput {
+  name: string;
+  email: string;
+  phone: string;
+  companyName: string;
+  website: string;
+  notes: string;
+}
+
+/** Entreprise (nom, domaine pro ou site) puis contact (email, sinon téléphone) : retrouvés ou créés */
+async function findOrCreateContact(ws: string, owner: string | null, c: ContactInput) {
+  const sb = db();
+  const phone = normalizePhone(c.phone) ?? c.phone.trim();
+
+  let company_id: string | null = null;
+  const domain = proDomain(c.email) || (c.website ? hostOfUrl(c.website) : "");
+  if (c.companyName) {
+    const { data } = await sb.from("companies").select("id").eq("workspace_id", ws).ilike("name", like(c.companyName)).limit(1).maybeSingle();
+    company_id = data?.id ?? null;
+  }
+  if (!company_id && domain) {
+    const { data } = await sb.from("companies").select("id").eq("workspace_id", ws).ilike("website", `%${like(domain)}%`).limit(1).maybeSingle();
+    company_id = data?.id ?? null;
+  }
+  if (!company_id && (c.companyName || domain)) {
+    const { data } = await sb
+      .from("companies")
+      .insert({
+        workspace_id: ws,
+        name: c.companyName || titleCase(domain.split(".")[0]),
+        website: c.website ? hostOfUrl(c.website) : domain,
+        status: "lead",
+        owner_id: owner,
+        notes: c.notes,
+      })
+      .select("id")
+      .single();
+    company_id = data?.id ?? null;
+  }
+
+  const cols = "id, email, phone, company_id";
+  let found = c.email ? (await sb.from("contacts").select(cols).eq("workspace_id", ws).ilike("email", like(c.email)).limit(1).maybeSingle()).data : null;
+  const variants = phoneVariants(c.phone);
+  if (!found && variants.length) found = (await sb.from("contacts").select(cols).eq("workspace_id", ws).in("phone", variants).limit(1).maybeSingle()).data;
+
+  if (found) {
+    const patch: { phone?: string; email?: string; company_id?: string } = {};
+    if (!found.phone && phone) patch.phone = phone;
+    if (!found.email && c.email) patch.email = c.email;
+    if (!found.company_id && company_id) patch.company_id = company_id;
+    if (Object.keys(patch).length) await sb.from("contacts").update(patch).eq("id", found.id);
+    return { contact_id: found.id, company_id: company_id ?? found.company_id };
+  }
+
+  const [first, ...rest] = c.name.trim().split(/\s+/);
+  const { data } = await sb
+    .from("contacts")
+    .insert({ workspace_id: ws, company_id, first_name: first || c.email || phone, last_name: rest.join(" "), email: c.email, phone, notes: c.notes })
+    .select("id")
+    .single();
+  return { contact_id: data?.id ?? null, company_id };
+}
+
+interface NewDeal {
+  title: string;
+  company_id: string | null;
+  contact_id: string;
+  stage: { id: string; name: string } | null;
+  source: string;
+  via: string;
+}
+
+async function createDeal(ws: string, owner: string | null, d: NewDeal) {
+  const sb = db();
+  const { data: top } = d.stage ? await sb.from("deals").select("position").eq("stage_id", d.stage.id).order("position").limit(1).maybeSingle() : { data: null };
+  const { data: deal } = await sb
+    .from("deals")
+    .insert({
+      workspace_id: ws,
+      title: d.title,
+      company_id: d.company_id,
+      contact_id: d.contact_id,
+      stage_id: d.stage?.id ?? null,
+      owner_id: owner,
+      source: d.source,
+      position: top ? Number(top.position) - 1000 : 1000,
+    })
+    .select("id")
+    .single();
+  if (!deal) return null;
+  // Le déclencheur « Deal confié » ferait doublon avec la notification du rendez-vous
+  await sb.from("notifications").delete().eq("deal_id", deal.id).eq("kind", "deal").like("body", "Deal confié%");
+  await sb.from("activity").insert({ workspace_id: ws, verb: "deal.created", deal_id: deal.id, actor_id: null, meta: { title: d.title, stage: d.stage?.name ?? null, via: d.via } });
+  return deal.id;
+}
+
 export interface CrmLink {
   contact_id: string | null;
   company_id: string | null;
@@ -364,63 +459,26 @@ export async function syncCrm(
   const answers = (b.answers ?? {}) as Record<string, string>;
   const website = answers.website ?? "";
 
-  // Entreprise
-  let company_id: string | null = null;
   const companyName = (b.company_name || answers.company || "").trim();
-  const domain = proDomain(b.email) || (website ? hostOfUrl(website) : "");
-  if (companyName) {
-    const { data } = await sb.from("companies").select("id").eq("workspace_id", ws).ilike("name", like(companyName)).limit(1).maybeSingle();
-    company_id = data?.id ?? null;
-  }
-  if (!company_id && domain) {
-    const { data } = await sb.from("companies").select("id").eq("workspace_id", ws).ilike("website", `%${like(domain)}%`).limit(1).maybeSingle();
-    company_id = data?.id ?? null;
-  }
-  if (!company_id && (companyName || domain)) {
-    const { data } = await sb
-      .from("companies")
-      .insert({
-        workspace_id: ws,
-        name: companyName || titleCase(domain.split(".")[0]),
-        website: website ? hostOfUrl(website) : domain,
-        status: "lead",
-        owner_id: b.owner_id,
-        notes: "Créée par une prise de rendez-vous.",
-      })
-      .select("id")
-      .single();
-    company_id = data?.id ?? null;
-  }
+  const { contact_id, company_id } = await findOrCreateContact(ws, b.owner_id, {
+    name: b.name,
+    email: b.email,
+    phone: b.phone ?? "",
+    companyName,
+    website,
+    notes: "Créé par une prise de rendez-vous.",
+  });
 
-  // Contact
-  let contact_id: string | null = null;
-  const { data: found } = await sb.from("contacts").select("id, phone, company_id").eq("workspace_id", ws).ilike("email", like(b.email)).limit(1).maybeSingle();
-  if (found) {
-    contact_id = found.id;
-    const patch: { phone?: string; company_id?: string } = {};
-    if (!found.phone && b.phone) patch.phone = b.phone;
-    if (!found.company_id && company_id) patch.company_id = company_id;
-    if (Object.keys(patch).length) await sb.from("contacts").update(patch).eq("id", found.id);
-    if (!company_id) company_id = found.company_id;
-  } else {
-    const [first, ...rest] = b.name.trim().split(/\s+/);
-    const { data } = await sb
-      .from("contacts")
-      .insert({ workspace_id: ws, company_id, first_name: first ?? "", last_name: rest.join(" "), email: b.email, phone: b.phone ?? "", notes: "Créé par une prise de rendez-vous." })
-      .select("id")
-      .single();
-    contact_id = data?.id ?? null;
-  }
-
-  // Deal : on reprend un deal ouvert du contact, sinon on en crée un dans « Appel découverte »
+  // Deal : on reprend un deal ouvert du contact (avancé à l'étape d'entrée s'il est en amont), sinon on en crée un dans « Appel découverte »
   let deal_id: string | null = null;
   if (type?.create_deal !== false && contact_id) {
     const { data: stages } = await sb.from("pipeline_stages").select("id, name, kind, position").eq("workspace_id", ws).order("position");
     const open = (stages ?? []).filter((s) => s.kind === "open");
+    const entry = entryStage(open);
     const { data: existing } = open.length
       ? await sb
           .from("deals")
-          .select("id")
+          .select("id, stage_id")
           .eq("workspace_id", ws)
           .eq("contact_id", contact_id)
           .in("stage_id", open.map((s) => s.id))
@@ -428,37 +486,17 @@ export async function syncCrm(
           .limit(1)
           .maybeSingle()
       : { data: null };
-    if (existing) deal_id = existing.id;
-    else {
-      const stage = entryStage(open);
-      const { data: top } = stage
-        ? await sb.from("deals").select("position").eq("stage_id", stage.id).order("position").limit(1).maybeSingle()
-        : { data: null };
+    if (existing) {
+      deal_id = existing.id;
+      const to = advanceStage({ current: existing.stage_id, entry: entry?.id ?? null, stages: stages ?? [] });
+      if (to) await sb.from("deals").update({ stage_id: to }).eq("id", existing.id);
+    } else {
       const utm = (b.utm ?? {}) as Record<string, string>;
       const source = utm.utm_source ? [utm.utm_source, utm.utm_campaign].filter(Boolean).join(" / ").slice(0, 120) : "Prise de rendez-vous";
       let companyLabel = companyName;
       if (!companyLabel && company_id) companyLabel = (await sb.from("companies").select("name").eq("id", company_id).maybeSingle()).data?.name ?? "";
       const title = `${type?.name ?? b.title} · ${companyLabel || b.name}`.slice(0, 200);
-      const { data: deal } = await sb
-        .from("deals")
-        .insert({
-          workspace_id: ws,
-          title,
-          company_id,
-          contact_id,
-          stage_id: stage?.id ?? null,
-          owner_id: b.owner_id,
-          source,
-          position: top ? Number(top.position) - 1000 : 1000,
-        })
-        .select("id")
-        .single();
-      deal_id = deal?.id ?? null;
-      if (deal_id) {
-        // Le déclencheur « Deal confié » ferait doublon avec la notification du rendez-vous
-        await sb.from("notifications").delete().eq("deal_id", deal_id).eq("kind", "deal").like("body", "Deal confié%");
-        await sb.from("activity").insert({ workspace_id: ws, verb: "deal.created", deal_id, actor_id: null, meta: { title, stage: stage?.name ?? null, via: "booking" } });
-      }
+      deal_id = await createDeal(ws, b.owner_id, { title, company_id, contact_id, stage: entry, source, via: "booking" });
     }
   }
 
@@ -523,7 +561,7 @@ async function pushGoogle(b: Booking, pp: PublicProfile, type: BookingType): Pro
     `${type.name} réservé en ligne via Agence OS.`,
     "",
     `Nom : ${b.name}`,
-    `Email : ${b.email}`,
+    canEmail(b) ? `Email : ${b.email}` : `Téléphone : ${b.phone}`,
     ...qs.filter((q) => answers[q.key]).map((q) => `${q.label} : ${answers[q.key]}`),
     "",
     `Déplacer ou annuler : ${appUrl()}/b/r/${b.token}`,
@@ -536,7 +574,7 @@ async function pushGoogle(b: Booking, pp: PublicProfile, type: BookingType): Pro
       start: b.start_at,
       end: b.end_at,
       timeZone: pp.timezone,
-      attendee: { email: b.email, name: b.name },
+      attendee: canEmail(b) ? { email: b.email, name: b.name } : undefined,
       location: kind === "phone" ? `Téléphone : ${b.phone}` : kind === "address" || kind === "video" ? type.location_value : undefined,
       meet: kind === "google_meet",
     });
@@ -560,7 +598,7 @@ async function mailCtx(b: Booking, pp: Pick<PublicProfile, "timezone" | "host" |
     agency: pp.workspace.name,
     host: { name: pp.host.name, email: pp.host.email },
     typeName,
-    guest: { name: b.name, email: b.email, tz: isValidTz(b.timezone) ? b.timezone : pp.timezone },
+    guest: { name: b.name, email: b.email, phone: b.phone, tz: isValidTz(b.timezone) ? b.timezone : pp.timezone },
     start: b.start_at,
     end: b.end_at,
     hostTz: pp.timezone,
@@ -584,7 +622,7 @@ function icsFor(b: Booking, pp: Pick<PublicProfile, "host">, typeName: string, c
     location: b.meet_url || (kind === "phone" ? `Téléphone : ${b.location}` : b.location) || LOCATION[kind]?.name,
     url: b.meet_url || undefined,
     organizer: { name: pp.host.name, email: pp.host.email },
-    attendee: { name: b.name, email: b.email },
+    attendee: canEmail(b) ? { name: b.name, email: b.email } : undefined,
     cancelled,
     sequence: b.reschedule_count + (cancelled ? 1 : 0),
   });
@@ -598,8 +636,8 @@ async function mailBooked(b: Booking, pp: PublicProfile, type: BookingType, resc
   const attachments = b.google_event_id ? undefined : [{ filename: "rendez-vous.ics", content: Buffer.from(icsFor(b, pp, type.name)).toString("base64"), contentType: "text/calendar" }];
   const h = hostBooked(c, rescheduled);
   await Promise.all([
-    sendEmail({ to: b.email, subject: g.subject, html: g.html, replyTo: pp.host.email, attachments }),
-    sendEmail({ to: pp.host.email, subject: h.subject, html: h.html, replyTo: b.email }),
+    canEmail(b) ? sendEmail({ to: b.email, subject: g.subject, html: g.html, replyTo: pp.host.email, attachments }) : null,
+    sendEmail({ to: pp.host.email, subject: h.subject, html: h.html, replyTo: b.email || undefined }),
   ]);
 }
 
@@ -627,7 +665,7 @@ async function trackBooking(b: Booking, pp: PublicProfile, type: BookingType, in
   // Visiteur : identifiant du script (_aos_id) si transmis, sinon celui déjà connu pour cet email
   let anon = input.aos_id ?? "";
   if (!anon) {
-    const { data: v } = await sb.from("visitors").select("anon_id").eq("site_id", site.id).eq("email", b.email).order("last_seen", { ascending: false }).limit(1).maybeSingle();
+    const v = canEmail(b) ? (await sb.from("visitors").select("anon_id").eq("site_id", site.id).eq("email", b.email).order("last_seen", { ascending: false }).limit(1).maybeSingle()).data : null;
     anon = v?.anon_id ?? `bk_${randomBytes(12).toString("hex")}`;
   }
   const now = new Date().toISOString();
@@ -666,7 +704,7 @@ async function trackBooking(b: Booking, pp: PublicProfile, type: BookingType, in
   }
   const res = await recordConversion(
     site,
-    { anon_id: anon, email: b.email, type: "booking", order_id: `booking:${b.id}`, name: b.name, phone: b.phone || undefined, props: { rdv: type.name, start: b.start_at } },
+    { anon_id: anon, email: b.email || undefined, type: "booking", order_id: `booking:${b.id}`, name: b.name, phone: b.phone || undefined, props: { rdv: type.name, start: b.start_at } },
     "api",
   );
   if (!res.ok) console.error("[booking] tracking", res.error);
@@ -732,18 +770,20 @@ export async function cancelBooking(b: Booking, by: "guest" | "host" | "calcom",
     const c = await mailCtx(row, pp, typeName, type?.questions);
     c.reason = reason;
     const g = guestCancelled({ ...c, appUrl: type && pp.slug ? `${appUrl()}/b/${pp.slug}/${type.slug}` : undefined }, by === "host");
-    const mails = [
-      sendEmail({
-        to: row.email,
-        subject: g.subject,
-        html: g.html,
-        replyTo: pp.host.email,
-        attachments: row.google_event_id ? undefined : [{ filename: "annulation.ics", content: Buffer.from(icsFor(row, pp, typeName, true)).toString("base64"), contentType: "text/calendar" }],
-      }),
-    ];
+    const mails: Promise<unknown>[] = [];
+    if (canEmail(row))
+      mails.push(
+        sendEmail({
+          to: row.email,
+          subject: g.subject,
+          html: g.html,
+          replyTo: pp.host.email,
+          attachments: row.google_event_id ? undefined : [{ filename: "annulation.ics", content: Buffer.from(icsFor(row, pp, typeName, true)).toString("base64"), contentType: "text/calendar" }],
+        }),
+      );
     if (by === "guest") {
       const h = hostCancelled(c);
-      mails.push(sendEmail({ to: pp.host.email, subject: h.subject, html: h.html, replyTo: row.email }));
+      mails.push(sendEmail({ to: pp.host.email, subject: h.subject, html: h.html, replyTo: row.email || undefined }));
     }
     await Promise.allSettled(mails);
   }
@@ -799,6 +839,7 @@ export async function sendReminders() {
     .eq("status", "confirmed")
     .eq("source", "native")
     .eq("demo", false)
+    .neq("email", "")
     .gt("start_at", new Date(now).toISOString())
     .lt("start_at", new Date(now + 25 * 3600_000).toISOString())
     .or("reminded_24h_at.is.null,reminded_1h_at.is.null")
@@ -837,6 +878,64 @@ export async function sendReminders() {
     if (Object.keys(patch).length) await sb.from("bookings").update(patch).eq("id", b.id);
   }
   return { sent, checked: data?.length ?? 0 };
+}
+
+// ---------------------------------------------------------------------
+// Lead partiel : contact saisi avant le calendrier, sans rendez-vous
+// ---------------------------------------------------------------------
+export async function captureLead(input: LeadInput) {
+  const pp = await loadPublicProfile(input.profile);
+  const type = pp?.types.find((t) => t.slug === input.type);
+  if (!pp || !type || !type.contact_first) throw new BookingError("Ce type de rendez-vous n'est plus disponible.", 404);
+
+  const values = { name: input.name ?? "", email: input.email ?? "", phone: input.phone ?? "" };
+  if (!shouldCapture({ mode: contactModeOf(type), values, lastSent: null, final: true }).send) throw new BookingError("Merci d'indiquer un moyen de contact.");
+
+  const questions = readQuestions(type.questions);
+  const checked = validateAnswers({ questions, locationKind: type.location_kind, answers: input.answers, partial: true });
+  if (!checked.ok) throw new BookingError(checked.error);
+
+  const sb = db();
+  const ws = pp.workspace_id;
+  const { contact_id, company_id } = await findOrCreateContact(ws, pp.user_id, {
+    ...values,
+    companyName: (checked.answers.company ?? "").trim(),
+    website: checked.answers.website ?? "",
+    notes: "Créé par le formulaire de réservation.",
+  });
+  if (!contact_id) throw new BookingError("L'enregistrement a échoué, merci de réessayer.", 500);
+
+  const { data: stages } = await sb.from("pipeline_stages").select("id, name, kind, position").eq("workspace_id", ws).order("position");
+  const all = stages ?? [];
+  const open = all.filter((s) => s.kind === "open");
+  const { data: openDeal } = open.length
+    ? await sb.from("deals").select("id, stage_id").eq("workspace_id", ws).eq("contact_id", contact_id).in("stage_id", open.map((s) => s.id)).order("created_at", { ascending: false }).limit(1).maybeSingle()
+    : { data: null };
+  if (openDeal && openDeal.stage_id !== leadStage(all)?.id) return;
+
+  const lastNote = openDeal ? ((await sb.from("crm_activities").select("body").eq("deal_id", openDeal.id).eq("kind", "note").order("created_at", { ascending: false }).limit(1).maybeSingle()).data?.body ?? null) : null;
+  const plan = planLead({
+    typeName: type.name,
+    ...values,
+    phone: normalizePhone(values.phone) ?? "",
+    origin: input.origin,
+    company: (checked.answers.company ?? "").trim(),
+    utm: cleanUtm(input.utm),
+    answers: checked.answers,
+    questions,
+    stages: all,
+    openDeal: openDeal ? { id: openDeal.id } : null,
+    lastNote,
+  });
+
+  let deal_id = openDeal?.id ?? null;
+  if (plan.deal) {
+    const stage = all.find((s) => s.id === plan.deal!.stageId) ?? null;
+    deal_id = await createDeal(ws, pp.user_id, { title: plan.deal.title, company_id, contact_id, stage, source: plan.deal.source, via: "booking_lead" });
+  }
+  const link = { workspace_id: ws, deal_id, company_id, contact_id, owner_id: pp.user_id };
+  if (plan.note) await addActivity(link, "note", plan.note, true);
+  if (plan.notify) await notifyHost(link, `Nouveau lead : ${values.name || values.email || values.phone}, n'a pas encore réservé`);
 }
 
 export const newSecret = () => randomBytes(24).toString("hex");

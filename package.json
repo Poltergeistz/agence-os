@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:unit": "node --experimental-strip-types --test src/lib/booking/tests/*.test.mjs",
+    "test:e2e": "node src/lib/booking/tests/contact-first.e2e.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

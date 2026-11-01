@@ -186,7 +186,7 @@ export interface EventInput {
   start: string;
   end: string;
   timeZone: string;
-  attendee: { email: string; name: string };
+  attendee?: { email: string; name: string };
   location?: string;
   meet: boolean;
 }
@@ -198,7 +198,7 @@ export async function createEvent(conn: CalendarConn, e: EventInput) {
     description: e.description,
     start: { dateTime: e.start, timeZone: e.timeZone },
     end: { dateTime: e.end, timeZone: e.timeZone },
-    attendees: [{ email: e.attendee.email, displayName: e.attendee.name }],
+    attendees: e.attendee ? [{ email: e.attendee.email, displayName: e.attendee.name }] : undefined,
     location: e.location || undefined,
     guestsCanModify: false,
     reminders: { useDefault: true },

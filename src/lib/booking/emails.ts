@@ -13,7 +13,7 @@ export interface MailCtx {
   agency: string;
   host: { name: string; email: string };
   typeName: string;
-  guest: { name: string; email: string; tz: string };
+  guest: { name: string; email: string; phone?: string; tz: string };
   start: string;
   end: string;
   hostTz: string;
@@ -81,7 +81,7 @@ export function guestReminder(c: MailCtx, soon: boolean) {
 }
 
 export function hostBooked(c: MailCtx, rescheduled = false) {
-  const body = `<p>${esc(c.guest.name)} (${esc(c.guest.email)}) ${rescheduled ? "a déplacé son" : "a réservé un"} ${esc(c.typeName.toLowerCase())} :<br>${whenHost(c)}</p>
+  const body = `<p>${esc(c.guest.name)} (${esc(c.guest.email || c.guest.phone || "")}) ${rescheduled ? "a déplacé son" : "a réservé un"} ${esc(c.typeName.toLowerCase())} :<br>${whenHost(c)}</p>
 <p style="margin-top:10px">${whereHtml(c)}</p>${answersHtml(c)}
 <p style="margin-top:12px;font-size:13px;color:#6b6760">Le contact et le deal sont à jour dans le CRM.</p>`;
   return {
@@ -91,7 +91,7 @@ export function hostBooked(c: MailCtx, rescheduled = false) {
 }
 
 export function hostCancelled(c: MailCtx) {
-  const body = `<p>${esc(c.guest.name)} (${esc(c.guest.email)}) a annulé son ${esc(c.typeName.toLowerCase())} :<br>${whenHost(c)}</p>
+  const body = `<p>${esc(c.guest.name)} (${esc(c.guest.email || c.guest.phone || "")}) a annulé son ${esc(c.typeName.toLowerCase())} :<br>${whenHost(c)}</p>
 ${c.reason ? `<p style="margin-top:10px;color:#57544e">« ${esc(c.reason)} »</p>` : ""}`;
   return {
     subject: `Rendez-vous annulé : ${c.guest.name} (${c.typeName})`,

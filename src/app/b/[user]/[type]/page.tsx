@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 
 import { PublicBooker } from "@/components/booking/public-booker";
 import { PublicShell } from "@/components/booking/public-shell";
-import { loadPublicProfile, reschedulable } from "@/lib/booking/server";
+import { contactModeOf, loadPublicProfile, reschedulable } from "@/lib/booking/server";
 import { readQuestions } from "@/lib/booking/shared";
 import { emailEnabled } from "@/lib/email";
 
@@ -40,7 +40,7 @@ export default async function BookingTypePage({ params, searchParams }: PageProp
   return (
     <PublicShell agency={pp.workspace.name} accent={pp.workspace.accent} embed={sp.embed === "1"}>
       <PublicBooker
-        profile={{ slug: pp.slug, name: pp.host.name, headline: pp.headline, color: pp.host.color, timezone: pp.timezone }}
+        profile={{ slug: pp.slug, name: pp.host.name, headline: pp.headline, color: pp.host.color, timezone: pp.timezone, terms_url: pp.terms_url, privacy_url: pp.privacy_url }}
         type={{
           slug: t.slug,
           name: t.name,
@@ -50,6 +50,8 @@ export default async function BookingTypePage({ params, searchParams }: PageProp
           location_value: t.location_kind === "address" ? t.location_value : "",
           questions: readQuestions(t.questions),
           color: t.color,
+          contact_first: t.contact_first,
+          contact_mode: contactModeOf(t),
         }}
         emailOn={emailEnabled()}
         reschedule={reschedule}

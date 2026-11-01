@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle, ArrowLeft, CalendarCheck, CalendarPlus, ChevronLeft, ChevronRight, Clock, Globe, MapPin, Phone, Video,
@@ -8,19 +8,30 @@ import {
 
 import { Avatar } from "@/components/ui/avatar";
 import { addDaysStr, dayIn, isoWeekday, tzLabel } from "@/lib/booking/engine";
+import { validateAnswers } from "@/lib/booking/answers";
+import { shouldCapture } from "@/lib/booking/capture";
+import { isEmail, validateContact, type ContactField, type ContactMode } from "@/lib/booking/contact";
+import { calendarLocked, initialStep, nextStep, stepIndex, type FlowConfig, type FlowEvent, type Step } from "@/lib/booking/flow";
+import { normalizePhone } from "@/lib/booking/phone";
 import { durationLabel, fmtDay, fmtTime, fmtWhen, googleCalendarLink, type LocationKind, type Question } from "@/lib/booking/shared";
 import { colorOf } from "@/lib/constants";
 import { useNow } from "./common";
+import { ContactForm } from "./contact-form";
+import { QuestionField } from "./question-field";
 
 export interface BookerProps {
-  profile: { slug: string; name: string; headline: string; color: string; timezone: string };
-  type: { slug: string; name: string; description: string; duration_min: number; location_kind: string; location_value: string; questions: Question[]; color: string };
+  profile: { slug: string; name: string; headline: string; color: string; timezone: string; terms_url: string; privacy_url: string };
+  type: { slug: string; name: string; description: string; duration_min: number; location_kind: string; location_value: string; questions: Question[]; color: string; contact_first: boolean; contact_mode: ContactMode };
   emailOn: boolean;
   reschedule: { token: string; start: string; end: string; name: string; email: string } | null;
   backHref: string | null;
 }
 
-type Step = "pick" | "form" | "done";
+const utmOf = (sp: URLSearchParams) => {
+  const utm: Record<string, string> = {};
+  for (const [k, v] of sp) if (/^utm_|^(gclid|fbclid|ttclid|msclkid)$/.test(k)) utm[k] = v;
+  return utm;
+};
 
 const MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 const WD = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."];
@@ -74,11 +85,20 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
   const [month, setMonth] = useState<string | null>(null);
   const [day, setDay] = useState<string | null>(null);
   const [slot, setSlot] = useState<number | null>(null);
-  const [step, setStep] = useState<Step>("pick");
+  const cfg = useMemo<FlowConfig>(() => ({ contactFirst: type.contact_first, reschedule: !!reschedule }), [type.contact_first, reschedule]);
+  const infoFirst = cfg.contactFirst && !cfg.reschedule;
+  const [step, setStep] = useState<Step>(() => initialStep(cfg));
+  const go = (e: FlowEvent) => setStep((s) => nextStep(s, e, cfg));
   const [values, setValues] = useState<Record<string, string>>(() => ({ name: reschedule?.name ?? "", email: reschedule?.email ?? "" }));
   const [hp, setHp] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Partial<Record<ContactField, string>>>({});
+  const [infoBusy, setInfoBusy] = useState(false);
+  const [live, setLive] = useState("");
+  const lastSent = useRef<string | null>(null);
+  const busy = step === "submitting";
+  const view = step === "submitting" ? (infoFirst ? "pick" : "form") : step;
+  const storeKey = `aos-bk:${profile.slug}:${type.slug}`;
   const [done, setDone] = useState<{ token: string; start: string; end: string; meet: string | null } | null>(null);
 
   // Fuseau du visiteur (détecté après le premier rendu pour éviter un écart d'hydratation)
@@ -94,6 +114,17 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
       /* fuseau du membre par défaut */
     }
   }, [profile.timezone]);
+
+  useEffect(() => {
+    if (!infoFirst) return;
+    try {
+      const saved = sessionStorage.getItem(storeKey);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- lecture unique du navigateur
+      if (saved) setValues((v) => ({ ...v, ...JSON.parse(saved) }));
+    } catch {
+      /* saisie non conservée */
+    }
+  }, [infoFirst, storeKey]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -157,24 +188,92 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
     return qs.map((q) => (q.key === "phone" && type.location_kind === "phone" ? { ...q, required: true } : q));
   }, [type]);
 
+  const otherQuestions = useMemo(() => questions.filter((q) => q.key !== "phone"), [questions]);
+  const setValue = (k: string, v: string) => {
+    const next = { ...values, [k]: v };
+    setValues(next);
+    if (!infoFirst) return;
+    try {
+      sessionStorage.setItem(storeKey, JSON.stringify(next));
+    } catch {
+      /* saisie non conservée */
+    }
+  };
+  const otherAnswers = () => Object.fromEntries(otherQuestions.filter((q) => values[q.key]?.trim()).map((q) => [q.key, values[q.key].trim()]));
+
   const pick = (t: number) => {
     setSlot(t);
     setError(null);
-    setStep("form");
+    if (infoFirst) return;
+    go("SLOT_CHOSEN");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  async function submit(e: React.FormEvent) {
+  async function captureLead(final: boolean) {
+    const v = { name: values.name ?? "", email: values.email ?? "", phone: values.phone ?? "" };
+    const r = shouldCapture({ mode: type.contact_mode, values: v, lastSent: lastSent.current, final });
+    if (!r.send) return;
+    lastSent.current = r.fingerprint;
+    const body = {
+      profile: profile.slug,
+      type: type.slug,
+      name: v.name.trim().length >= 2 ? v.name.trim() : undefined,
+      email: isEmail(v.email.trim().toLowerCase()) ? v.email.trim() : undefined,
+      phone: normalizePhone(v.phone) ? v.phone.trim() : undefined,
+      origin: r.origin,
+      answers: otherAnswers(),
+      utm: utmOf(new URLSearchParams(window.location.search)),
+      website_url: hp || undefined,
+    };
+    try {
+      await fetch("/api/booking/lead", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: true });
+    } catch {
+      /* la réservation enverra de toute façon les coordonnées */
+    }
+  }
+
+  function validateInfo() {
+    const c = validateContact({ mode: type.contact_mode, name: values.name ?? "", email: values.email ?? "", phone: values.phone ?? "" });
+    setErrors(c.ok ? {} : { [c.field]: c.error });
+    if (!c.ok) {
+      document.getElementById(`bk-${c.field}`)?.focus();
+      return false;
+    }
+    const a = validateAnswers({ questions: otherQuestions, locationKind: type.location_kind, answers: { ...otherAnswers(), phone: c.value.phone } });
+    setError(a.ok ? null : a.error);
+    return a.ok;
+  }
+
+  async function submitInfo() {
+    if (!validateInfo()) return;
+    setInfoBusy(true);
+    await Promise.race([captureLead(true), new Promise((r) => setTimeout(r, 1500))]);
+    setInfoBusy(false);
+    go("INFO_SUBMITTED");
+    setLive("Étape 2 sur 2, choisissez un créneau.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function submitForm(e: React.FormEvent) {
     e.preventDefault();
+    go("SUBMIT");
+    void book();
+  }
+
+  function confirm() {
+    go("SLOT_CHOSEN");
+    void book();
+  }
+
+  async function book() {
     if (!slot) return;
     setError(null);
-    setBusy(true);
     const sp = new URLSearchParams(window.location.search);
-    const utm: Record<string, string> = {};
-    for (const [k, v] of sp) if (/^utm_|^(gclid|fbclid|ttclid|msclkid)$/.test(k)) utm[k] = v;
+    const utm = utmOf(sp);
     const ref = sp.get("ref");
     const answers: Record<string, string> = {};
     for (const q of questions) if (values[q.key]?.trim()) answers[q.key] = values[q.key].trim();
+    if (values.phone?.trim()) answers.phone = values.phone.trim();
     try {
       const res = await fetch("/api/booking/book", {
         method: "POST",
@@ -199,19 +298,25 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
       if (!res.ok || !json.token) {
         setError(json.error || "La réservation a échoué, merci de réessayer.");
         if (res.status === 409) {
-          setStep("pick");
+          go("SLOT_TAKEN");
           setSlot(null);
           void load();
-        }
+        } else go("FAILED");
         return;
       }
       setDone({ token: json.token, start: json.start!, end: json.end!, meet: json.meet ?? null });
-      setStep("done");
+      go("BOOKED");
+      if (infoFirst) {
+        try {
+          sessionStorage.removeItem(storeKey);
+        } catch {
+          /* rien à effacer */
+        }
+      }
       if (window.parent !== window) window.parent.postMessage({ type: "aos-booking:booked", start: json.start }, "*");
     } catch {
       setError("Connexion impossible, merci de réessayer.");
-    } finally {
-      setBusy(false);
+      go("FAILED");
     }
   }
 
@@ -229,7 +334,7 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
           </span>
           <h1>{reschedule ? "Rendez-vous déplacé" : "Rendez-vous confirmé"}</h1>
           <p>
-            {emailOn
+            {emailOn && values.email?.trim()
               ? `Un email de confirmation vient d'être envoyé à ${values.email}.`
               : "Ajoutez-le à votre agenda pour ne pas l'oublier."}
           </p>
@@ -273,14 +378,19 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
 
   const info = (
     <aside className="bk-info">
-      {backHref && step === "pick" && (
+      {backHref && view === "pick" && !infoFirst && (
         <Link className="bk-back" href={backHref}>
           <ArrowLeft size={14} /> Tous les rendez-vous
         </Link>
       )}
-      {step === "form" && (
-        <button type="button" className="bk-back" onClick={() => setStep("pick")}>
+      {view === "form" && (
+        <button type="button" className="bk-back" onClick={() => go("BACK_TO_PICK")}>
           <ArrowLeft size={14} /> Changer de créneau
+        </button>
+      )}
+      {view === "pick" && infoFirst && (
+        <button type="button" className="bk-back" onClick={() => go("EDIT_INFO")}>
+          <ArrowLeft size={14} /> Modifier mes informations
         </button>
       )}
       <div className="bk-host">
@@ -296,13 +406,14 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
         </span>
       </div>
       <h1 style={{ borderLeft: `3px solid ${color}`, paddingLeft: 10 }}>{type.name}</h1>
+      {stepIndex(step, cfg) && <div className="bk-step">Étape {stepIndex(step, cfg)}/2</div>}
       <div className="bk-meta">
         <div>
           <Clock size={16} />
           <span>{durationLabel(type.duration_min)}</span>
         </div>
         <LocationLine kind={type.location_kind} value={type.location_kind === "address" ? type.location_value : ""} />
-        {slot && step === "form" && (
+        {slot && view === "form" && (
           <div>
             <CalendarCheck size={16} />
             <b>{fmtWhen(slot, slot + type.duration_min * 60000, tz)}</b>
@@ -319,15 +430,33 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
         </div>
       )}
       {type.description && <p className="bk-desc">{type.description}</p>}
+      {view === "info" && (
+        <ContactForm
+          mode={type.contact_mode}
+          phoneRequired={type.location_kind === "phone"}
+          values={values}
+          setValue={setValue}
+          questions={otherQuestions}
+          errors={errors}
+          formError={error}
+          busy={infoBusy}
+          hp={hp}
+          setHp={setHp}
+          termsUrl={profile.terms_url}
+          privacyUrl={profile.privacy_url}
+          onBlurField={() => void captureLead(false)}
+          onSubmit={() => void submitInfo()}
+        />
+      )}
     </aside>
   );
 
   // ---------- Formulaire ----------
-  if (step === "form" && slot) {
+  if (view === "form" && slot) {
     return (
       <div className="bk-card two">
         {info}
-        <form className="bk-form" onSubmit={submit} noValidate={false}>
+        <form className="bk-form" onSubmit={submitForm} noValidate={false}>
           <h2>Vos coordonnées</h2>
           {error && (
             <div className="bk-err" role="alert">
@@ -346,39 +475,9 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
             </label>
             <input id="bk-email" className="input" type="email" required autoComplete="email" value={values.email ?? ""} onChange={(e) => setValues((v) => ({ ...v, email: e.target.value }))} />
           </div>
-          {questions.map((q) => {
-            const id = `bk-q-${q.key}`;
-            const set = (val: string) => setValues((v) => ({ ...v, [q.key]: val }));
-            const common = { id, required: q.required, value: values[q.key] ?? "" };
-            return (
-              <div className="field" key={q.key}>
-                <label htmlFor={id}>
-                  {q.label}
-                  {q.required && <span className="req">*</span>}
-                </label>
-                {q.type === "textarea" ? (
-                  <textarea {...common} className="textarea" rows={4} onChange={(e) => set(e.target.value)} />
-                ) : q.type === "select" ? (
-                  <select {...common} className="select" onChange={(e) => set(e.target.value)}>
-                    <option value="">Choisir…</option>
-                    {(q.options ?? []).map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    {...common}
-                    className="input"
-                    type={q.type === "phone" ? "tel" : q.type === "url" ? "text" : "text"}
-                    inputMode={q.type === "url" ? "url" : undefined}
-                    autoComplete={q.type === "phone" ? "tel" : q.key === "company" ? "organization" : q.type === "url" ? "url" : undefined}
-                    placeholder={q.type === "url" ? "exemple.fr" : undefined}
-                    onChange={(e) => set(e.target.value)}
-                  />
-                )}
-              </div>
-            );
-          })}
+          {questions.map((q) => (
+            <QuestionField key={q.key} q={q} value={values[q.key] ?? ""} onChange={(v) => setValue(q.key, v)} />
+          ))}
           <div className="bk-hp" aria-hidden>
             <label>
               Ne pas remplir
@@ -398,11 +497,15 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
 
   // ---------- Choix du créneau ----------
   const daySlots = activeDay ? (byDay.get(activeDay) ?? []) : [];
+  const locked = calendarLocked(step, cfg);
   const [yy, mm] = activeMonth.split("-").map(Number);
   return (
-    <div className="bk-card">
+    <div className={`bk-card${infoFirst ? " cf" : ""}${locked ? " locked" : ""}`}>
       {info}
-      <section className="bk-cal" aria-label="Choisir une date">
+      {locked && <p className="bk-lock" role="status">Merci de remplir le formulaire avant de choisir votre créneau horaire.</p>}
+      {locked && <p className="bk-next">Étape 2 : vous choisirez votre créneau juste après.</p>}
+      <div className="bk-sr" aria-live="polite">{live}</div>
+      <section className="bk-cal" aria-label="Choisir une date" inert={locked}>
         <h2>Choisissez une date</h2>
         {error && (
           <div className="bk-err" role="alert" style={{ marginBottom: 12 }}>
@@ -463,7 +566,7 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
           </select>
         </div>
       </section>
-      <section className="bk-times" aria-label="Choisir un horaire">
+      <section className="bk-times" aria-label="Choisir un horaire" inert={locked}>
         <h2>{activeDay && daySlots.length ? fmtDay(daySlots[0], tz) : "Horaires"}</h2>
         <div className="bk-slots">
           {slots === null ? (
@@ -480,6 +583,13 @@ export function PublicBooker({ profile, type, emailOn, reschedule, backHref }: B
             ))
           )}
         </div>
+        {infoFirst && slot && (
+          <div className="bk-confirm">
+            <button type="button" className="btn btn-primary btn-lg btn-block" disabled={busy} onClick={confirm}>
+              {busy ? "Réservation…" : `Confirmer ${fmtTime(slot, tz)}, ${fmtDay(slot, tz)}`}
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );
