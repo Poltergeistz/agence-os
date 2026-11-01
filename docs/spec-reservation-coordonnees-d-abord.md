@@ -391,3 +391,50 @@ Prises (30 octobre 2026) :
 
 Restant à fixer avant du trafic payant : base juridique écrite dans la politique de confidentialité, durée de
 conservation et purge des leads jamais réservés.
+
+## 9. Reste à faire
+
+État au 1er novembre 2026 : fonctionnalité codée, testée (83 tests unitaires, 50 vérifications e2e), poussée sur
+`feature/booking-contact-first`. Non fusionnée, non déployée.
+
+### Mise en ligne (dans cet ordre)
+- [ ] Appliquer la migration `0122` sur le Supabase de production, **avant** l'image : la page publique lit les
+      nouvelles colonnes.
+- [ ] Construire et pousser l'image `0.1.2`, puis passer le tag Coolify dessus (pas de déploiement manuel en plus du
+      push, ça double le build).
+- [ ] Créer l'étape « Lead non booké » en première colonne du pipeline (Réglages > Pipeline).
+- [ ] Cocher « Demander les coordonnées avant d'afficher les créneaux » sur « Appel découverte ».
+- [ ] Renseigner les liens conditions et confidentialité (Réservation > page publique).
+- [ ] Décider : ouvrir une pull request vers `main` du fork, ou rester sur la branche.
+
+### Interface
+- [ ] **Sélecteur de pays avec drapeau** : le préfixe est fixé à +33 (drapeau français). Un numéro étranger se saisit
+      en `+41…`. Pas indispensable pour l'instant.
+- [ ] Ordre des champs en mode email : le code garde nom, email, téléphone (comme avant), la maquette mettait l'email
+      avant le nom. À trancher.
+- [ ] Validation d'email côté navigateur volontairement simple (le serveur reste strict) : la durcir si besoin.
+
+### À vérifier à la main (pas couvert par le e2e)
+- [ ] Mode téléphone sans email : annulation, rappels, report par le lien, invité Google Agenda, `.ics`.
+- [ ] Report d'un rendez-vous (`/b/r/[token]`) sur un type « coordonnées d'abord ».
+- [ ] Rendu sur un vrai téléphone (iOS Safari : zoom des champs, barre « Confirmer » collée en bas).
+
+### RGPD et données
+- [ ] Écrire la base juridique (intérêt légitime) dans la politique de confidentialité. À faire relire.
+- [ ] Fixer la durée de conservation des leads jamais réservés (30 à 90 jours) et **automatiser la purge** :
+      deal à « Perdu » (raison « jamais réservé »), puis suppression des données personnelles.
+- [ ] Prévoir la désinscription / le droit d'opposition dans toute relance envoyée à un lead.
+
+### Évolutions possibles
+- [ ] Relance des leads non bookés : v1 = tâche CRM à J+1, v2 = envoi automatique (cas à tester : a-t-il réservé
+      entre-temps, désinscription, fréquence).
+- [ ] Capture à la saisie plus fine (par champ) une fois l'avis RGPD obtenu.
+- [ ] Verrouillage de l'API des créneaux par jeton signé, seulement si du scraping apparaît.
+- [ ] Entonnoir (captés, validés, bookés) affiché dans le tableau de bord plutôt que lu dans le CRM.
+
+### Outils
+- Tests unitaires : `npm run test:unit`. E2E : `npm run test:e2e` (serveur de dev + `.env.local` pointant sur une
+  base de DEV, jamais la production). Une base jetable se monte avec la CLI Supabase hors du dépôt (configuration
+  minimale : `-x studio,logflare,vector,edge-runtime,imgproxy,mailpit,realtime,postgres-meta,supavisor`).
+- La maquette interactive du formulaire est dans l'espace artefacts de David (« Maquette réservation coordonnées
+  d'abord »).
