@@ -170,7 +170,7 @@ th.r .crm-th { flex-direction: row-reverse; }
 .crm-prop .v { flex: 1; min-width: 0; display: flex; align-items: center; }
 .crm-prop .v > .pill { max-width: 100%; }
 .crm-props.single { grid-template-columns: 1fr; }
-.crm-money-inline { display: flex; align-items: center; gap: 6px; width: 100%; }
+.crm-money-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
 .crm-money-inline .crm-inline { width: 110px; flex: none; font-weight: 600; }
 .crm-panel .card-h { min-height: 44px; }
 .crm-panel .card-h h3 { font-size: var(--fs); display: flex; align-items: center; gap: 6px; }
@@ -306,7 +306,6 @@ th.r .crm-th { flex-direction: row-reverse; }
   .crm-col { width: 82vw; max-width: 300px; }
   .crm-props { grid-template-columns: 1fr; }
   .crm-prop .k { width: 96px; }
-  .crm-money-inline { flex-wrap: wrap; }
   .crm-money-inline .crm-inline { width: 90px; }
   .crm-dhead-actions { flex-wrap: wrap; }
   .crm-dhead { flex-direction: column; align-items: stretch; }
