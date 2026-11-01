@@ -3,7 +3,7 @@
 Modifications de ce fork par rapport à [impulsion-com/agence-os](https://github.com/impulsion-com/agence-os)
 (base : `e6eeb8c`).
 
-## Non publié
+## 0.1.1 (2026-10-30)
 
 ### Ajouté
 - Déploiement Docker : `Dockerfile` en trois étapes (sortie Next.js `standalone`, utilisateur non-root,
