@@ -425,6 +425,20 @@ conservation et purge des leads jamais réservés.
       deal à « Perdu » (raison « jamais réservé »), puis suppression des données personnelles.
 - [ ] Prévoir la désinscription / le droit d'opposition dans toute relance envoyée à un lead.
 
+### Livraison automatique (idée de David, 1er novembre 2026)
+Versionner `main` en semver et laisser une CI construire l'image Docker à chaque version.
+- [ ] Un tag `vX.Y.Z` sur `main` déclenche un workflow qui construit l'image et la pousse sur Docker Hub
+      (`poltergeistz/agence-os:X.Y.Z`, plus `latest`). Coolify reste épinglé sur le numéro de version.
+- [ ] Prérequis : le `Dockerfile`, le compose et `next.config.ts` (branche `feature/docker`) doivent d'abord être dans
+      `main` du fork. Aujourd'hui ils n'y sont pas, volontairement.
+- [ ] Contrainte à garder en tête : les variables `NEXT_PUBLIC_*` (URL Supabase, clé anon, URL de l'app) sont figées
+      dans l'image à la construction. La CI les reçoit en secrets de dépôt (valeurs publiques) et l'image produite est
+      donc propre à ton instance. Pour une image réutilisable ailleurs, il faudrait injecter ces valeurs au démarrage.
+- [ ] Choix de l'outil : GitHub Actions (le fork est sur GitHub, rien à héberger) ou Woodpecker (ton Forgejo).
+- [ ] Choix du versionnage : tag manuel, ou génération automatique (release-please, depuis les messages de commit).
+- [ ] Aligner `package.json` (0.1.0) sur la version de l'image en cours (0.1.1).
+- [ ] La migration SQL doit toujours passer **avant** le déploiement de l'image : à rappeler dans les notes de version.
+
 ### Évolutions possibles
 - [ ] Relance des leads non bookés : v1 = tâche CRM à J+1, v2 = envoi automatique (cas à tester : a-t-il réservé
       entre-temps, désinscription, fréquence).
