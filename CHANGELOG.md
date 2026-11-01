@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/Poltergeistz/agence-os/compare/v0.2.0...v0.2.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **crm:** le sélecteur Mensuel/Ponctuel ne déborde plus sur la colonne Étape de la fiche d'un deal ([#2](https://github.com/Poltergeistz/agence-os/issues/2)) ([a832cbc](https://github.com/Poltergeistz/agence-os/commit/a832cbcb0efe1b08a7a8538463633b7f6cfe4a9d))
+
 # [0.2.0](https://github.com/Poltergeistz/agence-os/compare/v0.1.1...v0.2.0) (2026-11-01)
 
 
