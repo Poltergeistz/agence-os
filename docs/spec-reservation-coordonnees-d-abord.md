@@ -442,6 +442,12 @@ Versionner `main` en semver et laisser une CI construire l'image Docker à chaqu
 ### Évolutions possibles
 - [ ] Relance des leads non bookés : v1 = tâche CRM à J+1, v2 = envoi automatique (cas à tester : a-t-il réservé
       entre-temps, désinscription, fréquence).
+- [ ] **Squelette de calendrier à la place du calendrier flouté (bureau uniquement).** Aujourd'hui l'arrière-plan
+      flouté de l'étape 1 est le vrai calendrier, avec les vraies disponibilités, rendu inerte. Cible : une grille
+      factice grisée, et les créneaux ne sont demandés à `/api/booking/slots` qu'après « Continuer » (moins d'appels
+      pour les visiteurs qui abandonnent, rien à lire dans la page avant la validation). Coût : un court chargement
+      à l'étape 2. Sur mobile le calendrier est déjà masqué à l'étape 1, mais la requête des créneaux part quand même
+      au chargement : à décaler aussi. N'empêche pas l'accès direct à l'API (voir le jeton signé ci-dessous).
 - [ ] Capture à la saisie plus fine (par champ) une fois l'avis RGPD obtenu.
 - [ ] Verrouillage de l'API des créneaux par jeton signé, seulement si du scraping apparaît.
 - [ ] Entonnoir (captés, validés, bookés) affiché dans le tableau de bord plutôt que lu dans le CRM.
