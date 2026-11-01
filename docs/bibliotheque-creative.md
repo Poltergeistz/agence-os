@@ -100,7 +100,7 @@ Par client : une **page concurrente** (recherche par nom, ou ID, ou URL de la pa
 
 ## Recommandations IA
 
-Facultatif : `ANTHROPIC_API_KEY`. Sans clé, la veille, le score et les filtres fonctionnent ; les zones IA affichent un encart explicatif. Modèles : `AI_MODEL_FAST` (tagging, par défaut `claude-haiku-4-5-20251001`) et `AI_MODEL_SMART` (recommandations, par défaut `claude-sonnet-5`). Coût indicatif : environ 1 € pour 1 000 éléments tagués, 5 à 10 centimes par recommandation.
+Facultatif : une clé au choix parmi `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` ou `AI_API_KEY` avec `AI_BASE_URL` (toute API compatible OpenAI). Sans clé, la veille, le score et les filtres fonctionnent ; les zones IA affichent un encart explicatif. Modèles : `AI_MODEL_FAST` (tagging) et `AI_MODEL_SMART` (recommandations), avec des valeurs par défaut chez Anthropic et OpenRouter. Coût indicatif avec Anthropic : environ 1 € pour 1 000 éléments tagués, 5 à 10 centimes par recommandation. Détail, coûts et dépannage : [fournisseur d'IA](ia-fournisseurs.md).
 
 ### Tagging
 

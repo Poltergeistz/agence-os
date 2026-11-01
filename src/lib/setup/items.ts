@@ -135,7 +135,7 @@ export const SETUP_ITEMS: SetupItem[] = [
   {
     id: "ai",
     title: "IA de l'analyse créa (au choix du fournisseur)",
-    why: "Étiquette chaque publicité (accroche, angle, format) et rédige les recommandations créa. Anthropic (environ 1 € pour 1 000 publicités étiquetées), OpenRouter (n'importe quel modèle) ou toute API compatible OpenAI.",
+    why: "Étiquette chaque publicité (accroche, angle, format) et rédige les recommandations créa. Une seule clé suffit, au choix : Anthropic, OpenRouter (tous les modèles) ou une API compatible OpenAI (avec AI_BASE_URL et les deux modèles AI_MODEL_FAST et AI_MODEL_SMART). Environ 1 € pour 1 000 publicités étiquetées avec Anthropic.",
     modules: ["creatives"],
     required: false,
     env: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "AI_API_KEY"],

@@ -114,6 +114,13 @@ test("réponse : blocs de code et texte autour tolérés", () => {
   assert.deepEqual(parseChatResponse(reply('Voici le résultat : {"a":{"b":2}} voilà.')).json, { a: { b: 2 } });
 });
 
+test("réponse : coût réel repris quand le fournisseur le donne (OpenRouter)", () => {
+  const r = parseChatResponse({ choices: [{ message: { content: "{}" }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 8, cost: 0.00005 } });
+  assert.deepEqual(r.usage, { input_tokens: 10, output_tokens: 8, cost: 0.00005 });
+  assert.equal("cost" in parseChatResponse(reply("{}")).usage, false);
+  assert.equal("cost" in parseChatResponse({ choices: [{ message: { content: "{}" }, finish_reason: "stop" }], usage: { cost: "x" } }).usage, false);
+});
+
 test("réponse : consommation absente tolérée", () => {
   const r = parseChatResponse({ choices: [{ message: { content: "{}" }, finish_reason: "stop" }] });
   assert.deepEqual(r.usage, { input_tokens: 0, output_tokens: 0 });

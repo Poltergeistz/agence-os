@@ -81,6 +81,8 @@ L'édition se choisit à l'installation (`NEXT_PUBLIC_EDITION`). Ajouter les mod
 **Claude et IA**
 - Serveur MCP : Claude Code, Claude Desktop ou Cowork lisent et pilotent tâches, CRM, propositions,
   reporting et attribution avec un jeton personnel.
+- IA de la bibliothèque créa (étiquetage, recommandations) avec le fournisseur de ton choix : Anthropic,
+  OpenRouter ou toute API compatible OpenAI ([guide](docs/ia-fournisseurs.md)).
 
 **Portail client**
 - Un espace à ton nom pour chaque client : performance et rapports, tâches à valider, créas à
@@ -105,7 +107,7 @@ Avec Docker ou Coolify (image `standalone`, Supabase Cloud ou auto-hébergé) : 
 Sinon, suis le guide [docs/deploiement.md](docs/deploiement.md) : Supabase (gratuit) et un hébergement
 Node.js (Hostinger, VPS ou Vercel Pro), environ 30 à 45 minutes, l'essentiel fait par Claude Code.
 Ensuite, **Réglages > Installation** donne pour chaque connexion un prompt Claude in Chrome et un
-bouton qui teste le résultat. Pour brancher Meta Ads et Google Ads : [docs/reporting.md](docs/reporting.md). Guides : [tracking](docs/tracking.md), [liens](docs/liens.md), [signature](docs/signature-electronique.md), [onboarding client](docs/onboarding-client.md), [rendez-vous](docs/rendez-vous.md), [bibliothèque créa](docs/bibliotheque-creative.md), [MCP](docs/mcp.md), [portail client](docs/portail-client.md), [analytics GA4 et Clarity](docs/analytics.md).
+bouton qui teste le résultat. Pour brancher Meta Ads et Google Ads : [docs/reporting.md](docs/reporting.md). Guides : [tracking](docs/tracking.md), [liens](docs/liens.md), [signature](docs/signature-electronique.md), [onboarding client](docs/onboarding-client.md), [rendez-vous](docs/rendez-vous.md), [bibliothèque créa](docs/bibliotheque-creative.md), [fournisseur d'IA](docs/ia-fournisseurs.md), [MCP](docs/mcp.md), [portail client](docs/portail-client.md), [analytics GA4 et Clarity](docs/analytics.md).
 
 ## Stack technique
 

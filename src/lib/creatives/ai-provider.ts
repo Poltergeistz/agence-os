@@ -79,7 +79,7 @@ export function buildChatRequest(p: OpenAiProvider, a: ChatAsk) {
 }
 
 export type ChatResult =
-  | { ok: true; json: Record<string, unknown>; usage: { input_tokens: number; output_tokens: number } }
+  | { ok: true; json: Record<string, unknown>; usage: { input_tokens: number; output_tokens: number; cost?: number } }
   | { ok: false; kind: "truncated" | "refusal" | "invalid"; message: string };
 
 function extractJson(text: string): Record<string, unknown> | undefined {
@@ -99,7 +99,7 @@ function extractJson(text: string): Record<string, unknown> | undefined {
 }
 
 export function parseChatResponse(body: unknown): ChatResult {
-  const root = (body && typeof body === "object" ? body : {}) as { error?: { message?: string }; choices?: { message?: { content?: unknown; refusal?: unknown }; finish_reason?: string }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+  const root = (body && typeof body === "object" ? body : {}) as { error?: { message?: string }; choices?: { message?: { content?: unknown; refusal?: unknown }; finish_reason?: string }[]; usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: unknown } };
   const choice = root.choices?.[0];
   if (!choice) return { ok: false, kind: "invalid", message: root.error?.message ? `Le fournisseur IA a renvoyé une erreur : ${String(root.error.message).slice(0, 200)}` : "Réponse vide du fournisseur IA." };
   if (choice.finish_reason === "length") return { ok: false, kind: "truncated", message: "Réponse du modèle tronquée : réduis la taille du lot ou choisis un modèle qui accepte plus de texte." };
@@ -108,7 +108,8 @@ export function parseChatResponse(body: unknown): ChatResult {
   const text = typeof raw === "string" ? raw : Array.isArray(raw) ? raw.map((x) => (x && typeof x === "object" && "text" in x ? String((x as { text: unknown }).text) : "")).join("") : "";
   const json = extractJson(text);
   if (!json) return { ok: false, kind: "invalid", message: "Le modèle n'a pas renvoyé de JSON lisible : choisis un modèle qui gère les sorties structurées (AI_MODEL_FAST, AI_MODEL_SMART)." };
-  return { ok: true, json, usage: { input_tokens: root.usage?.prompt_tokens ?? 0, output_tokens: root.usage?.completion_tokens ?? 0 } };
+  const cost = root.usage?.cost;
+  return { ok: true, json, usage: { input_tokens: root.usage?.prompt_tokens ?? 0, output_tokens: root.usage?.completion_tokens ?? 0, ...(typeof cost === "number" ? { cost } : {}) } };
 }
 
 /** Erreur HTTP de l'API → message en français, sans la clé. */
