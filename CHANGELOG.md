@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.2.0](https://github.com/Poltergeistz/agence-os/compare/v0.1.1...v0.2.0) (2026-11-01)
+
+
+### Features
+
+* **réservation:** formulaire coordonnées d'abord, capture de lead et rendez-vous sans email ([#1](https://github.com/Poltergeistz/agence-os/issues/1)) ([aef949a](https://github.com/Poltergeistz/agence-os/commit/aef949a855e91d47c38aa0e447b0f5ed4ab6d503))
+
 Modifications de ce fork par rapport à [impulsion-com/agence-os](https://github.com/impulsion-com/agence-os)
 (base : `e6eeb8c`).
 
