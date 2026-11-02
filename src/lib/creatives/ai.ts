@@ -1,47 +1,23 @@
 import "server-only";
 
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-
+import { AiError } from "./ai-chat";
+import { aiEnabled, askJson, modelsOf } from "./ai-client";
 import { RecommendationSchema, TagBatchSchema, mockRecommendation, mockTags, validateRecommendation, validateTagBatch, type RecoInput, type Recommendation } from "./ai-parse";
 import type { IntelTags } from "./intel-core";
 
 // IA de la bibliothèque créa (facultative) : tagging en masse et recommandations.
-// Sans ANTHROPIC_API_KEY, tout le reste fonctionne ; AI_MOCK=1 (interne, tests)
-// renvoie des réponses simulées sans appel réseau.
+// Fournisseur au choix (voir ai-provider.ts et ai-client.ts) : Anthropic, OpenRouter ou toute API
+// compatible OpenAI. Sans clé, tout le reste fonctionne ; AI_MOCK=1 (interne, tests) renvoie des
+// réponses simulées sans appel réseau.
 
-export const AI_MODEL_FAST = () => process.env.AI_MODEL_FAST || "claude-haiku-4-5-20251001";
-export const AI_MODEL_SMART = () => process.env.AI_MODEL_SMART || "claude-sonnet-5";
+export { AiError, aiEnabled };
+export const AI_MODEL_FAST = () => modelsOf().fast;
+export const AI_MODEL_SMART = () => modelsOf().smart;
 const mock = () => process.env.AI_MOCK === "1";
 
 /** Nombre maximum d'éléments tagués par synchro ou par clic (maîtrise du coût). */
 export const AI_TAG_LIMIT = Math.max(0, Number(process.env.AI_TAG_LIMIT || 40)) || 40;
 const BATCH = 10;
-
-export const aiEnabled = () => mock() || !!process.env.ANTHROPIC_API_KEY;
-
-export class AiError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AiError";
-  }
-}
-
-let cached: Anthropic | null = null;
-const client = () => (cached ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120_000 }));
-
-/** Erreur de l'API → message en français, sans secret. */
-function explain(e: unknown): AiError {
-  if (e instanceof AiError) return e;
-  if (e instanceof Anthropic.AuthenticationError) return new AiError("Clé ANTHROPIC_API_KEY refusée : vérifie-la dans les variables d'environnement.");
-  if (e instanceof Anthropic.PermissionDeniedError) return new AiError("La clé Anthropic n'a pas accès à ce modèle : change AI_MODEL_FAST ou AI_MODEL_SMART.");
-  if (e instanceof Anthropic.NotFoundError) return new AiError("Modèle introuvable : vérifie AI_MODEL_FAST et AI_MODEL_SMART.");
-  if (e instanceof Anthropic.RateLimitError) return new AiError("Limite de l'API Anthropic atteinte : réessaie dans une minute.");
-  if (e instanceof Anthropic.BadRequestError) return new AiError(`Requête refusée par l'API Anthropic : ${e.message.slice(0, 200)}`);
-  if (e instanceof Anthropic.APIConnectionError) return new AiError("Impossible de joindre l'API Anthropic (réseau ou délai dépassé).");
-  if (e instanceof Anthropic.APIError) return new AiError(`API Anthropic indisponible (${e.status ?? "erreur"}) : réessaie plus tard.`);
-  return new AiError(e instanceof Error ? e.message : String(e));
-}
 
 // ---------------------------------------------------------------------
 // Tagging (modèle rapide, par lots de 10)
@@ -60,21 +36,9 @@ Réponds uniquement pour les identifiants fournis.`;
 
 async function tagBatch(items: { id: string; text: string; format?: string | null }[]): Promise<Map<string, IntelTags>> {
   if (mock()) return new Map(items.map((i) => [i.id, mockTags(i)]));
-  const res = await client().messages.parse({
-    model: AI_MODEL_FAST(),
-    max_tokens: 6000,
-    system: [{ type: "text", text: TAG_SYSTEM, cache_control: { type: "ephemeral" } }],
-    messages: [
-      {
-        role: "user",
-        content: `Classe ces ${items.length} éléments :\n\n${items.map((i) => `<element id="${i.id}"${i.format ? ` format_connu="${i.format}"` : ""}>\n${i.text.slice(0, 1500)}\n</element>`).join("\n\n")}`,
-      },
-    ],
-    output_config: { format: zodOutputFormat(TagBatchSchema) },
-  });
-  if (res.stop_reason === "max_tokens") throw new AiError("Réponse du modèle tronquée : réduis la taille du lot.");
-  if (res.stop_reason === "refusal") throw new AiError("Le modèle a refusé de classer ce lot.");
-  return validateTagBatch(res.parsed_output, items.map((i) => i.id));
+  const user = `Classe ces ${items.length} éléments :\n\n${items.map((i) => `<element id="${i.id}"${i.format ? ` format_connu="${i.format}"` : ""}>\n${i.text.slice(0, 1500)}\n</element>`).join("\n\n")}`;
+  const r = await askJson({ tier: "fast", system: TAG_SYSTEM, user, schema: TagBatchSchema, schemaName: "tags", maxTokens: 6000 });
+  return validateTagBatch(r.json, items.map((i) => i.id));
 }
 
 /** Tague une liste d'éléments par lots. Renvoie les tags obtenus et la première erreur éventuelle. */
@@ -85,7 +49,7 @@ export async function tagItems(items: { id: string; text: string; format?: strin
     try {
       for (const [k, v] of await tagBatch(items.slice(i, i + BATCH))) out.set(k, v);
     } catch (e) {
-      error = explain(e).message;
+      error = e instanceof AiError ? e.message : e instanceof Error ? e.message : String(e);
       break; // on garde ce qui est acquis, la suite repartira au prochain appel
     }
   }
@@ -107,28 +71,7 @@ Règles :
 export async function recommend(input: RecoInput): Promise<{ output: Recommendation; model: string; usage: Record<string, unknown> | null }> {
   const known = input.competitors.map((c) => c.archive_id);
   if (mock()) return { output: validateRecommendation(mockRecommendation(input), known), model: "simulation", usage: null };
-  try {
-    const res = await client().messages.parse({
-      model: AI_MODEL_SMART(),
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      system: [{ type: "text", text: RECO_SYSTEM, cache_control: { type: "ephemeral" } }],
-      messages: [
-        {
-          role: "user",
-          content: `Client : ${input.company}\nDonnées (JSON) :\n${JSON.stringify(input)}\n\nPropose les opportunités.`,
-        },
-      ],
-      output_config: { effort: "medium", format: zodOutputFormat(RecommendationSchema) },
-    });
-    if (res.stop_reason === "max_tokens") throw new AiError("Réponse du modèle tronquée : réessaie.");
-    if (res.stop_reason === "refusal") throw new AiError("Le modèle a refusé de produire cette recommandation.");
-    return {
-      output: validateRecommendation(res.parsed_output, known),
-      model: AI_MODEL_SMART(),
-      usage: { input_tokens: res.usage.input_tokens, output_tokens: res.usage.output_tokens, cache_read: res.usage.cache_read_input_tokens ?? 0 },
-    };
-  } catch (e) {
-    throw explain(e);
-  }
+  const user = `Client : ${input.company}\nDonnées (JSON) :\n${JSON.stringify(input)}\n\nPropose les opportunités.`;
+  const r = await askJson({ tier: "smart", system: RECO_SYSTEM, user, schema: RecommendationSchema, schemaName: "recommandation", maxTokens: 16000 });
+  return { output: validateRecommendation(r.json, known), model: r.model, usage: r.usage };
 }

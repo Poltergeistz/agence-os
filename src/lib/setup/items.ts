@@ -21,6 +21,8 @@ export interface SetupItem {
   /** Indispensable au fonctionnement (sinon : facultatif, pour une fonctionnalité précise) */
   required: boolean;
   env: string[];
+  /** Plusieurs variables possibles : une seule suffit (ex. une clé IA parmi plusieurs fournisseurs) */
+  anyEnv?: boolean;
   check?: CheckId;
   /** Outil conseillé pour exécuter le prompt */
   tool: "chrome" | "code";
@@ -131,16 +133,17 @@ export const SETUP_ITEMS: SetupItem[] = [
       `Configure l'envoi d'emails de mon app Agence OS (${c.appUrl}) avec Resend.\n\n1. Sur resend.com (crée le compte si besoin), Domains > Add Domain avec mon domaine d'envoi (demande-le-moi si tu ne le connais pas, idéalement un sous-domaine comme mail.mondomaine.fr). Pose les enregistrements DNS demandés chez mon registraire (GoDaddy, OVH, Hostinger…), puis attends que le domaine soit « Verified ».\n2. API Keys > Create API Key, nom « Agence OS », permission « Full access » (la page Installation en a besoin pour vérifier le domaine).\n3. Variables : RESEND_API_KEY = la clé ; EMAIL_FROM = "${c.agency} <bonjour@MON-DOMAINE>" avec le domaine vérifié.\n\n${where(c)}${outro(c)}`,
   },
   {
-    id: "anthropic",
-    title: "IA de l'analyse créa (Anthropic)",
-    why: "Étiquette chaque publicité (accroche, angle, format) et rédige les recommandations créa. Compte environ 1 € pour 1 000 publicités étiquetées.",
+    id: "ai",
+    title: "IA de l'analyse créa (au choix du fournisseur)",
+    why: "Étiquette chaque publicité (accroche, angle, format) et rédige les recommandations créa. Une seule clé suffit, au choix : Anthropic, OpenRouter (tous les modèles) ou une API compatible OpenAI (avec AI_BASE_URL et les deux modèles AI_MODEL_FAST et AI_MODEL_SMART). Environ 1 € pour 1 000 publicités étiquetées avec Anthropic.",
     modules: ["creatives"],
     required: false,
-    env: ["ANTHROPIC_API_KEY"],
-    check: "anthropic",
+    env: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "AI_API_KEY"],
+    anyEnv: true,
+    check: "ai",
     tool: "chrome",
     prompt: (c) =>
-      `Sur console.anthropic.com (crée le compte si besoin), crée une clé API nommée « Agence OS » dans un espace de travail dédié, et règle une limite de dépense mensuelle de 20 $ sur cet espace. Ajoute la clé comme variable ANTHROPIC_API_KEY de mon app Agence OS.\n\n${where(c)}${outro(c)}`,
+      `Choisis UN fournisseur d'IA pour mon app Agence OS et ajoute sa clé comme variable.\n\nOption 1, Anthropic : sur console.anthropic.com (crée le compte si besoin), crée une clé API nommée « Agence OS » dans un espace de travail dédié, avec une limite de dépense mensuelle de 20 $. Variable : ANTHROPIC_API_KEY.\n\nOption 2, OpenRouter (accès à de nombreux modèles) : sur openrouter.ai, crée une clé « Agence OS » avec une limite de crédit. Variable : OPENROUTER_API_KEY. Modèles conseillés : AI_MODEL_FAST = un modèle rapide et bon marché, AI_MODEL_SMART = un modèle plus puissant (identifiants d'OpenRouter, par exemple anthropic/claude-haiku-4.5 et anthropic/claude-sonnet-4.5, valeurs par défaut).\n\nOption 3, autre API compatible OpenAI : variables AI_API_KEY, AI_BASE_URL (par exemple https://api.openai.com/v1), AI_MODEL_FAST et AI_MODEL_SMART (obligatoires).\n\nAI_PROVIDER (anthropic, openrouter ou openai) force le choix si plusieurs clés existent.\n\n${where(c)}${outro(c)}`,
   },
 ];
 

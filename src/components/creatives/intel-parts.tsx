@@ -35,7 +35,7 @@ export function useAction() {
   return { busy, run };
 }
 
-/** Encart affiché quand ANTHROPIC_API_KEY n'est pas configurée. */
+/** Encart affiché quand aucune clé IA n'est configurée. */
 export function AiCallout({ what }: { what: string }) {
   return (
     <div className="crv-in-callout ai" role="note">
@@ -45,9 +45,10 @@ export function AiCallout({ what }: { what: string }) {
       <div>
         <b>L&apos;IA n&apos;est pas activée : {what}</b>
         <p>
-          Ajoute la variable <code>ANTHROPIC_API_KEY</code> (clé créée sur console.anthropic.com) dans <code>.env.local</code> ou dans les variables
-          d&apos;environnement de Vercel, puis redéploie. Coût indicatif : environ 1 € pour 1 000 pubs ou concepts tagués (modèle rapide), 5 à 10 centimes
-          par recommandation (modèle avancé). La veille, le score et les filtres fonctionnent sans.
+          Ajoute la clé d&apos;un fournisseur dans <code>.env.local</code> ou dans les variables d&apos;environnement de ton hébergement, puis redéploie :{" "}
+          <code>ANTHROPIC_API_KEY</code> (console.anthropic.com), <code>OPENROUTER_API_KEY</code> (openrouter.ai, tous les modèles) ou{" "}
+          <code>AI_API_KEY</code> avec <code>AI_BASE_URL</code> (toute API compatible OpenAI). Coût indicatif avec Anthropic : environ 1 € pour 1 000 pubs ou
+          concepts tagués (modèle rapide), 5 à 10 centimes par recommandation (modèle avancé). La veille, le score et les filtres fonctionnent sans.
         </p>
       </div>
     </div>

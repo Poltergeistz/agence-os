@@ -23,7 +23,7 @@ const Body = z.discriminatedUnion("action", [
 ]);
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
-const NO_AI = "L'IA n'est pas configurée : ajoute ANTHROPIC_API_KEY dans les variables d'environnement.";
+const NO_AI = "L'IA n'est pas configurée : ajoute une clé (ANTHROPIC_API_KEY, OPENROUTER_API_KEY ou AI_API_KEY) dans les variables d'environnement.";
 
 export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json().catch(() => null));

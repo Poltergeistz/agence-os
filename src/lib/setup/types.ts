@@ -1,4 +1,4 @@
-export type CheckId = "app_url" | "schema" | "cron" | "meta" | "google" | "resend" | "anthropic";
+export type CheckId = "app_url" | "schema" | "cron" | "meta" | "google" | "resend" | "ai";
 
 export interface CheckResult {
   ok: boolean;

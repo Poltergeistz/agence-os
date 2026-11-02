@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:unit": "node --experimental-strip-types --test src/lib/booking/tests/*.test.mjs",
+    "test:unit": "node --experimental-strip-types --test src/lib/booking/tests/*.test.mjs src/lib/creatives/tests/*.test.mjs",
     "test:e2e": "node src/lib/booking/tests/contact-first.e2e.mjs"
   },
   "dependencies": {

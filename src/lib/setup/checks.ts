@@ -1,6 +1,7 @@
 import "server-only";
 
 import { META_GRAPH_VERSION, integrationStatus } from "@/lib/ads/config";
+import { modelsFor, resolveProvider } from "@/lib/creatives/ai-provider";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { normalizeOrigin } from "./origin";
 import type { CheckId, CheckResult, CronJob } from "./types";
@@ -46,7 +47,7 @@ async function getJson(url: string, init?: RequestInit): Promise<{ status: numbe
  * Teste pour de vrai un réglage du serveur, sans rien écrire nulle part.
  * Meta : jeton d'app (identifiant + clé secrète). Google : le client OAuth répond « code invalide »
  * et non « client inconnu ». Resend : la clé lit les domaines et celui d'EMAIL_FROM est vérifié.
- * Anthropic : la clé liste les modèles.
+ * IA : la clé du fournisseur choisi (Anthropic, OpenRouter ou API compatible OpenAI) est acceptée.
  */
 export async function runCheck(id: CheckId, origin: string): Promise<CheckResult> {
   try {
@@ -124,12 +125,19 @@ export async function runCheck(id: CheckId, origin: string): Promise<CheckResult
         if (d.status !== "verified") return fail(`Le domaine ${domain} est « ${d.status} » dans Resend : les enregistrements DNS ne sont pas encore validés.`);
         return pass(`Resend prêt : ${domain} est vérifié.`);
       }
-      case "anthropic": {
-        if (!env("ANTHROPIC_API_KEY")) return fail("ANTHROPIC_API_KEY est vide.");
-        const r = await getJson("https://api.anthropic.com/v1/models?limit=1", { headers: { "x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01" } });
-        if (r.status === 200) return pass("Clé Anthropic valide.");
-        const err = r.body.error as { message?: string } | undefined;
-        return fail(`Anthropic refuse la clé : ${err?.message ?? `HTTP ${r.status}`}.`);
+      case "ai": {
+        const p = resolveProvider(process.env);
+        if (!p) return fail("Aucune clé IA : renseigne ANTHROPIC_API_KEY, OPENROUTER_API_KEY, ou AI_API_KEY avec AI_BASE_URL (et AI_PROVIDER si tu veux forcer le choix).");
+        const m = modelsFor(p, process.env);
+        if (!m.fast || !m.smart) return fail(`${p.label} : renseigne AI_MODEL_FAST et AI_MODEL_SMART (identifiants des modèles à utiliser).`);
+        const r =
+          p.kind === "anthropic"
+            ? await getJson("https://api.anthropic.com/v1/models?limit=1", { headers: { "x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01" } })
+            : await getJson(p.id === "openrouter" ? `${p.baseUrl}/auth/key` : `${p.baseUrl}/models`, { headers: { Authorization: `Bearer ${p.apiKey}` } });
+        if (r.status === 200) return pass(`Clé ${p.label} valide. Modèles : ${m.fast} (rapide), ${m.smart} (avancé).`);
+        if (r.status === 401 || r.status === 403) return fail(`${p.label} refuse la clé : vérifie ${p.keyVar}.`);
+        const err = r.body.error as { message?: string } | string | undefined;
+        return fail(`${p.label} ne répond pas normalement : ${typeof err === "string" ? err : (err?.message ?? `HTTP ${r.status}`)}.`);
       }
     }
   } catch (e) {
