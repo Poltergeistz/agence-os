@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.3.0](https://github.com/Poltergeistz/agence-os/compare/v0.2.1...v0.3.0) (2026-11-02)
+
+
+### Features
+
+* **ia:** Anthropic, OpenRouter ou toute API compatible OpenAI pour l'analyse créa ([#4](https://github.com/Poltergeistz/agence-os/issues/4)) ([1e2609c](https://github.com/Poltergeistz/agence-os/commit/1e2609c528e92d7afafbb77bc66169934de94187))
+
 ## [0.2.1](https://github.com/Poltergeistz/agence-os/compare/v0.2.0...v0.2.1) (2026-11-01)
 
 
